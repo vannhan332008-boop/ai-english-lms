@@ -1,0 +1,521 @@
+// =========================================================================
+// EnglishFlow LMS - Database Schema (Prisma)
+// -------------------------------------------------------------------------
+// - LOCAL DEV: provider = "postgresql"
+// - PRODUCTION (Supabase / Render / Neon): Đổi thành provider = "postgresql"
+//   kèm DATABASE_URL="postgresql://user:pass@host:5432/dbname?schema=public"
+// =========================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// 1. SaaS Multi-Tenancy Core
+// -------------------------------------------------------------
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+model Tenant {
+  id              String       @id @default(cuid())
+  name            String
+  code            String       @unique // e.g., "ef-badinh-hn"
+  domain          String?
+  plan            String       @default("PROFESSIONAL") // STARTER | PROFESSIONAL | ENTERPRISE
+  aiQuota         Int          @default(1000000) // Monthly token quota
+  status          TenantStatus @default(ACTIVE)
+  contactEmail    String
+  contactPhone    String?
+  address         String?
+  city            String?      // "Hanoi", "Ho Chi Minh City"
+  
+  // AI Tokens Quota Control
+  aiTokenQuota    Int          @default(1000000)
+  aiTokensUsed    Int          @default(0)
+
+  // Subscription Plan link
+  planId          String?
+  subscriptionPlan SubscriptionPlan? @relation(fields: [planId], references: [id])
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Multi-tenant relations
+  users           User[]
+  courses         Course[]
+  classes         Class[]
+  assignments     Assignment[]
+  exams           Exam[]
+  submissions     Submission[]
+  aiUsageLogs     AIUsageLog[]
+  flashcardDecks  FlashcardDeck[]
+  materials       Material[]
+
+  @@index([code])
+}
+
+model SubscriptionPlan {
+  id              String   @id @default(cuid())
+  name            String
+  code            String   @unique // STARTER, PROFESSIONAL, ENTERPRISE
+  priceMonthly    Float
+  aiTokenLimit    Int
+  maxStudents     Int
+  maxTeachers     Int
+  features        String   // JSON string of feature flags
+  createdAt       DateTime @default(now())
+
+  tenants         Tenant[]
+}
+
+model AIUsageLog {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module          String   // "WRITING", "SPEAKING", "LESSON_PLAN", "QUIZ_GEN"
+  tokensUsed      Int
+  modelName       String   // "gemini-2.5-pro", "gemini-2.5-flash", "mock-ai-engine"
+  costEstimate    Float    @default(0.0)
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+// -------------------------------------------------------------
+// 2. Auth, Users & RBAC
+// -------------------------------------------------------------
+
+enum UserRole {
+  SUPER_ADMIN
+  CENTER_MANAGER
+  TEACHER
+  STUDENT
+}
+
+enum CefrLevel {
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  fullName        String
+  role            UserRole  @default(STUDENT)
+  avatar          String?
+  phone           String?
+  cefrLevel       CefrLevel @default(B1)
+  streakDays      Int       @default(0)
+  lastActiveAt    DateTime?
+  isActive        Boolean   @default(true)
+
+  // Tenant reference (Null for global SUPER_ADMIN)
+  tenantId        String?
+  tenant          Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relationships
+  refreshTokens       RefreshToken[]
+  teachingClasses     Class[]             @relation("TeacherClasses")
+  enrollments         Enrollment[]
+  submissions         Submission[]
+  aiUsageLogs         AIUsageLog[]
+  flashcardProgresses FlashcardProgress[]
+  flashcardReviews    FlashcardReview[]
+
+  @@index([tenantId])
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// -------------------------------------------------------------
+// 3. Academic Structure (Courses, Classes, Curriculum)
+// -------------------------------------------------------------
+
+enum CourseType {
+  IELTS
+  TOEIC
+  COMMUNICATION
+  BUSINESS_ENGLISH
+  KIDS_TEENS
+}
+
+model Course {
+  id              String      @id @default(cuid())
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title           String
+  code            String      // e.g. "IELTS-7.0-INTENSIVE"
+  type            CourseType  @default(IELTS)
+  description     String?
+  targetLevel     String?     // e.g. "IELTS 6.5 - 7.5"
+  price           Float       @default(0.0)
+  thumbnailUrl    String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  classes         Class[]
+  modules         Module[]
+  exams           Exam[]
+  flashcardDecks  FlashcardDeck[]
+
+  @@index([tenantId])
+}
+
+enum ClassStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+}
+
+model Class {
+  id              String      @id @default(cuid())
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  name            String      // e.g. "IELTS Master - K24 Morning"
+  roomNumber      String?
+  scheduleInfo    String?     // e.g. "Mon-Wed-Fri 18:30 - 20:30"
+  status          ClassStatus @default(ONGOING)
+  startDate       DateTime?
+  endDate         DateTime?
+
+  teacherId       String?
+  teacher         User?       @relation("TeacherClasses", fields: [teacherId], references: [id])
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  enrollments     Enrollment[]
+  assignments     Assignment[]
+
+  @@index([tenantId])
+  @@index([courseId])
+  @@index([teacherId])
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  COMPLETED
+  DROPPED
+}
+
+model Enrollment {
+  id              String           @id @default(cuid())
+  classId         String
+  class           Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status          EnrollmentStatus @default(ENROLLED)
+  enrolledAt      DateTime         @default(now())
+  attendanceRate  Float            @default(100.0)
+  finalGrade      Float?
+
+  @@unique([classId, studentId])
+  @@index([classId])
+  @@index([studentId])
+}
+
+model Module {
+  id          String   @id @default(cuid())
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title       String   // e.g. "Unit 1: Environment & Climate Change"
+  orderIndex  Int      @default(1)
+  description String?
+
+  lessons     Lesson[]
+
+  @@index([courseId])
+}
+
+model Lesson {
+  id              String     @id @default(cuid())
+  moduleId        String
+  module          Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  title           String     // e.g. "Academic Writing Task 2: Problem & Solution"
+  orderIndex      Int        @default(1)
+  content         String?    // Rich text / markdown guidance
+  videoUrl        String?
+  durationMinutes Int        @default(45)
+
+  materials       Material[]
+
+  @@index([moduleId])
+}
+
+model Material {
+  id        String   @id @default(cuid())
+  lessonId  String?
+  lesson    Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title     String
+  fileType  String   // "PDF", "AUDIO", "DOCUMENT", "IMAGE"
+  fileUrl   String
+  fileSize  Int?     // bytes
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([lessonId])
+}
+
+// -------------------------------------------------------------
+// 4. Assignments, Exams & Submissions
+// -------------------------------------------------------------
+
+enum AssignmentType {
+  WRITING
+  SPEAKING
+  QUIZ
+  HOMEWORK
+}
+
+model Assignment {
+  id           String         @id @default(cuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  classId      String
+  class        Class          @relation(fields: [classId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  type         AssignmentType @default(WRITING)
+  dueDate      DateTime?
+  maxScore     Float          @default(10.0)
+  rubricConfig String?        // JSON string configuring rubric criteria
+  createdAt    DateTime       @default(now())
+
+  submissions  Submission[]
+
+  @@index([tenantId])
+  @@index([classId])
+}
+
+enum ExamType {
+  IELTS_MOCK
+  TOEIC_MOCK
+  PLACEMENT_TEST
+  MID_TERM
+  FINAL
+}
+
+model Exam {
+  id              String     @id @default(cuid())
+  tenantId        String
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  courseId        String?
+  course          Course?    @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  title           String     // e.g. "IELTS Academic Full Mock Test #12"
+  type            ExamType   @default(IELTS_MOCK)
+  durationMinutes Int        @default(60)
+  passingScore    Float      @default(6.5)
+  createdAt       DateTime   @default(now())
+
+  questions       Question[]
+  submissions     Submission[]
+
+  @@index([tenantId])
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  FILL_BLANK
+  ESSAY
+  AUDIO_RECORDING
+}
+
+model Question {
+  id            String       @id @default(cuid())
+  examId        String
+  exam          Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  questionType  QuestionType @default(MULTIPLE_CHOICE)
+  prompt        String
+  mediaUrl      String?
+  options       String?      // JSON array of string options
+  correctAnswer String?      // Expected answer key or regex
+  explanation   String?      // Pedagogical explanation
+  points        Float        @default(1.0)
+  orderIndex    Int          @default(1)
+
+  @@index([examId])
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  AI_EVALUATED
+  TEACHER_APPROVED
+  RETURNED
+}
+
+model Submission {
+  id                  String             @id @default(cuid())
+  tenantId            String
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignmentId        String?
+  assignment          Assignment?        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  examId              String?
+  exam                Exam?              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId           String
+  student             User               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  content             String?            // Written text or audio link
+  audioDurationSeconds Int?
+  score               Float?             // Final score (e.g. 7.5)
+  aiScore             Float?             // Raw AI estimated score
+  aiFeedback          String?            // Quick AI feedback summary
+  status              SubmissionStatus   @default(SUBMITTED)
+  teacherFeedback     String?
+  submittedAt         DateTime           @default(now())
+  evaluatedAt         DateTime?
+
+  writingEvaluation   WritingEvaluation?
+  speakingEvaluation  SpeakingEvaluation?
+
+  @@index([tenantId])
+  @@index([assignmentId])
+  @@index([examId])
+  @@index([studentId])
+}
+
+// -------------------------------------------------------------
+// 5. AI Evaluation Results & Flashcards (SM-2 SRS)
+// -------------------------------------------------------------
+
+model WritingEvaluation {
+  id                   String     @id @default(cuid())
+  submissionId         String     @unique
+  submission           Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  originalText         String
+  improvedText         String?
+  bandScore            Float      // Overall IELTS/CEFR band score (e.g. 7.0)
+  taskAchievementScore Float
+  coherenceScore       Float
+  lexicalScore         Float
+  grammarScore         Float
+  detailedFeedback     String     // JSON structured strengths/weaknesses
+  errorList            String     // JSON list of grammatical/lexical errors with line & suggestion
+  createdAt            DateTime   @default(now())
+}
+
+model SpeakingEvaluation {
+  id                  String     @id @default(cuid())
+  submissionId        String     @unique
+  submission          Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  audioPath           String
+  transcript          String
+  overallScore        Float      // Overall Speaking score (e.g. 6.5)
+  fluencyScore        Float
+  pronunciationScore  Float
+  vocabularyScore     Float
+  grammarScore        Float
+  ipaErrors           String     // JSON array of mispronounced words with target IPA vs detected IPA
+  detailedFeedback    String     // JSON text feedback
+  createdAt           DateTime   @default(now())
+}
+
+model FlashcardDeck {
+  id          String      @id @default(cuid())
+  tenantId    String
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  courseId    String?
+  course      Course?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  title       String      // e.g. "IELTS Band 7.0+ Academic Collocations"
+  topic       String?
+  level       String?     // "B2-C1"
+  totalCards  Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  cards       Flashcard[]
+
+  @@index([tenantId])
+}
+
+model Flashcard {
+  id                String              @id @default(cuid())
+  deckId            String?
+  deck              FlashcardDeck?      @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  word              String
+  phonetic          String?             // e.g. "/prəˌnʌn.siˈeɪ.ʃən/"
+  partOfSpeech      String?             // "noun", "verb", "adjective"
+  definition        String
+  vietnameseMeaning String
+  exampleSentence   String?
+  audioUrl          String?
+  createdAt         DateTime            @default(now())
+
+  progresses        FlashcardProgress[]
+  reviews           FlashcardReview[]
+
+  @@index([deckId])
+}
+
+model FlashcardProgress {
+  id             String    @id @default(cuid())
+  studentId      String
+  student        User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  cardId         String
+  card           Flashcard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  // SM-2 Spaced Repetition Parameters
+  interval       Int       @default(1)    // Days until next review
+  repetition     Int       @default(0)    // Consecutive successful reviews
+  easeFactor     Float     @default(2.5)  // Multiplier for interval growth
+  nextReviewDate DateTime  @default(now())
+  lastReviewedAt DateTime?
+
+  @@unique([studentId, cardId])
+  @@index([studentId])
+  @@index([cardId])
+  @@index([nextReviewDate])
+}
+
+model FlashcardReview {
+  id             String    @id @default(cuid())
+  cardId         String
+  card           Flashcard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  // SRS algorithm fields (SuperMemo-2)
+  easeFactor     Float     @default(2.5)  // Multiplier for interval growth
+  interval       Int       @default(1)    // Days until next review
+  repetition     Int       @default(0)    // Consecutive successful reviews
+  quality        Int       @default(4)    // 0-5 rating
+  nextReviewDate DateTime  @default(now())
+  reviewedAt     DateTime  @default(now())
+
+  @@index([studentId])
+  @@index([cardId])
+  @@index([nextReviewDate])
+}
+
