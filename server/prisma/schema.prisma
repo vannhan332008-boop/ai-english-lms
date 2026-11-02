@@ -7,7 +7,7 @@
 // =========================================================================
 
 datasource db {
-  provider = "sqlite" // Đổi thành "postgresql" khi deploy Production
+  provider = "postgresql" // Đổi thành "postgresql" khi deploy Production
   url      = env("DATABASE_URL")
 }
 
