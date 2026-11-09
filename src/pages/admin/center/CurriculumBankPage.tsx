@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   FileText,
   FileCheck,
@@ -24,6 +24,8 @@ import { Modal } from '@/components/ui/Modal'
 import { DataTable } from '@/components/ui/DataTable'
 import { mockMaterials, mockExamBank, type MaterialItem, type ExamBankItem } from '@/mocks/materials'
 import { useToast } from '@/hooks/useToast'
+import { materialService } from '@/services/materialService'
+import { MaterialLibraryModal } from '@/components/specific/MaterialLibraryModal'
 
 export const CurriculumBankPage = () => {
   const { success, error, info } = useToast()
@@ -39,12 +41,6 @@ export const CurriculumBankPage = () => {
   const [materialSearch, setMaterialSearch] = useState('')
   const [materialCategory, setMaterialCategory] = useState<'ALL' | 'IELTS' | 'TOEIC' | 'GENERAL' | 'GRAMMAR'>('ALL')
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
-
-  // Upload Form
-  const [newTitle, setNewTitle] = useState('')
-  const [newCategory, setNewCategory] = useState<'IELTS' | 'TOEIC' | 'GENERAL' | 'GRAMMAR'>('IELTS')
-  const [newFileType, setNewFileType] = useState<'PDF' | 'AUDIO' | 'DOCX' | 'VIDEO'>('PDF')
-  const [newTags, setNewTags] = useState('IELTS, Writing, Vocabulary')
 
   // Exam Bank State
   const [examList, setExamList] = useState<ExamBankItem[]>(mockExamBank)
@@ -83,31 +79,6 @@ export const CurriculumBankPage = () => {
   }, [examList, examSearch, examDifficulty])
 
   // Handlers
-  const handleUploadMaterial = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newTitle.trim()) {
-      showToast('Vui lòng nhập tên tài liệu!', 'error')
-      return
-    }
-
-    const created: MaterialItem = {
-      id: `mat_${Date.now()}`,
-      title: newTitle.endsWith('.pdf') || newTitle.endsWith('.docx') ? newTitle : `${newTitle}.${newFileType.toLowerCase()}`,
-      category: newCategory,
-      fileType: newFileType,
-      sizeMB: parseFloat((Math.random() * 15 + 2).toFixed(1)),
-      downloadsCount: 0,
-      uploadedBy: 'Ban Học vụ Landmark',
-      uploadDate: new Date().toLocaleDateString('vi-VN'),
-      tags: newTags.split(',').map((t) => t.trim()),
-    }
-
-    setMaterialsList([created, ...materialsList])
-    showToast(`Đã tải lên tài liệu: ${created.title}`, 'success')
-    setIsUploadModalOpen(false)
-    setNewTitle('')
-  }
-
   const handleCreateExam = (e: React.FormEvent) => {
     e.preventDefault()
     if (!newExamTitle.trim()) {
@@ -133,9 +104,57 @@ export const CurriculumBankPage = () => {
     setNewExamTitle('')
   }
 
-  const handleDeleteMaterial = (id: string, title: string) => {
-    setMaterialsList(materialsList.filter((m) => m.id !== id))
-    showToast(`Đã xóa tài liệu: ${title}`, 'info')
+  const fetchMaterials = async () => {
+    try {
+      const data = await materialService.getTenantMaterials()
+      if (data && data.length > 0) {
+        const mapped: MaterialItem[] = data.map((d) => ({
+          id: d.id,
+          title: d.title,
+          category: 'GENERAL' as any,
+          fileType: (d.fileType === 'DOCUMENT' ? 'DOCX' : d.fileType) as any,
+          sizeMB: d.fileSize ? parseFloat((d.fileSize / (1024 * 1024)).toFixed(1)) : 1.5,
+          downloadsCount: 0,
+          uploadedBy: d.course?.title || 'Ban Học vụ Trung tâm',
+          uploadDate: new Date(d.createdAt).toLocaleDateString('vi-VN'),
+          tags: d.course ? [d.course.code, d.fileType] : ['Tài liệu trung tâm', d.fileType],
+        }))
+        setMaterialsList(mapped)
+      }
+    } catch (err) {
+      console.error('Failed to load materials from backend:', err)
+    }
+  }
+
+  useEffect(() => {
+    fetchMaterials()
+  }, [])
+
+  const handleDownloadMaterial = async (item: MaterialItem) => {
+    showToast(`Đang kết nối tải tệp an toàn: ${item.title}...`, 'info')
+    try {
+      if (!item.id.startsWith('mat_')) {
+        await materialService.downloadMaterial(item.id, item.title)
+        showToast(`Tải tài liệu "${item.title}" thành công`, 'success')
+      } else {
+        showToast(`Tài liệu mẫu đã sẵn sàng trong thư viện`, 'success')
+      }
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Không thể tải tệp tin', 'error')
+    }
+  }
+
+  const handleDeleteMaterial = async (id: string, title: string) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa tài liệu "${title}"? Thao tác không thể hoàn tác.`)) return
+    try {
+      if (!id.startsWith('mat_')) {
+        await materialService.deleteMaterial(id)
+      }
+      setMaterialsList((prev) => prev.filter((m) => m.id !== id))
+      showToast(`Đã xóa tài liệu: ${title}`, 'success')
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Xóa tài liệu thất bại', 'error')
+    }
   }
 
   const materialColumns = [
@@ -218,7 +237,7 @@ export const CurriculumBankPage = () => {
             variant="ghost"
             size="sm"
             className="text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
-            onClick={() => showToast(`Đang tải file: ${item.title}...`, 'success')}
+            onClick={() => handleDownloadMaterial(item)}
           >
             <Download className="w-4 h-4 mr-1" />
             Tải về
@@ -539,86 +558,14 @@ export const CurriculumBankPage = () => {
         </div>
       )}
 
-      {/* Modal Tải lên Tài liệu */}
-      <Modal
+      {/* Modal Tải lên Tài liệu An Toàn */}
+      <MaterialLibraryModal
         isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
-        title="Tải Tài Liệu Học Phần Lên Hệ Thống"
-        description="Lưu trữ tài liệu trên ổ D cục bộ an toàn, phục vụ giảng viên và học viên cơ sở."
-        size="md"
-      >
-        <form onSubmit={handleUploadMaterial} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Tiêu đề tài liệu / Tên giáo trình <span className="text-rose-500">*</span>
-            </label>
-            <Input
-              placeholder="VD: Tổng hợp Đề Thi Thật IELTS Writing Task 1 Quý 3/2026.pdf"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Chuyên mục đào tạo</label>
-              <Select
-                value={newCategory}
-                onChange={(e) => setNewCategory(e.target.value as any)}
-                options={[
-                  { value: 'IELTS', label: 'IELTS Preparation' },
-                  { value: 'TOEIC', label: 'TOEIC Mastery' },
-                  { value: 'GENERAL', label: 'Tiếng Anh Giao Tiếp' },
-                  { value: 'GRAMMAR', label: 'Ngữ Pháp Căn Bản' },
-                ]}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Định dạng file</label>
-              <Select
-                value={newFileType}
-                onChange={(e) => setNewFileType(e.target.value as any)}
-                options={[
-                  { value: 'PDF', label: 'PDF Document' },
-                  { value: 'AUDIO', label: 'Audio MP3/WAV' },
-                  { value: 'DOCX', label: 'Word DOCX' },
-                  { value: 'VIDEO', label: 'Video MP4' },
-                ]}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Thẻ từ khóa (Tags, cách nhau bằng dấu phẩy)
-            </label>
-            <Input
-              value={newTags}
-              onChange={(e) => setNewTags(e.target.value)}
-              placeholder="VD: Writing Task 1, Bar Chart, Vocabulary"
-            />
-          </div>
-
-          <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 text-center hover:border-indigo-500 transition-colors cursor-pointer bg-slate-50 dark:bg-slate-900/50">
-            <Upload className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
-              Kéo thả file vào đây hoặc <span className="text-indigo-600 underline">chọn từ máy tính</span>
-            </p>
-            <p className="text-xs text-slate-400 mt-1">Hỗ trợ PDF, MP3, DOCX, MP4 tối đa 50MB</p>
-          </div>
-
-          <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button type="button" variant="outline" onClick={() => setIsUploadModalOpen(false)}>
-              Hủy
-            </Button>
-            <Button type="submit" variant="primary">
-              Tải lên tài liệu
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        onClose={() => {
+          setIsUploadModalOpen(false)
+          fetchMaterials()
+        }}
+      />
 
       {/* Modal Khởi tạo Đề thi mới */}
       <Modal

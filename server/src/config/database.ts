@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { logger } from '../utils/logger.js'
 
 // Global singleton instance for Prisma Client
 const globalForPrisma = globalThis as unknown as {
@@ -18,9 +19,10 @@ if (process.env.NODE_ENV !== 'production') {
 export async function connectDatabase() {
   try {
     await prisma.$connect()
-    console.log('✅ [Database] SQLite connection established via Prisma ORM on Drive D')
+    const isPg = process.env.DATABASE_URL?.includes('postgresql')
+    logger.info(`[Database] Database connection established via Prisma ORM (${isPg ? 'PostgreSQL Supabase' : 'SQLite'})`)
   } catch (error) {
-    console.error('❌ [Database] Failed to connect to SQLite database:', error)
+    logger.error('[Database] Failed to connect to database:', error)
     process.exit(1)
   }
 }

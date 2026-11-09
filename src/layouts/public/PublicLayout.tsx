@@ -22,6 +22,7 @@ export const PublicLayout: React.FC = () => {
     { label: 'Trang chủ', path: '/' },
     { label: 'Tính năng AI', path: '/features' },
     { label: 'Bảng giá SaaS', path: '/pricing' },
+    { label: 'Khóa học', path: '/courses' },
     { label: 'Liên hệ & Demo', path: '/contact' },
   ]
 
@@ -83,12 +84,12 @@ export const PublicLayout: React.FC = () => {
                 <span>Vào Dashboard Demo</span>
               </Button>
             </Link>
-            <Link to="/auth/login">
+            <Link to="/login">
               <Button variant="outline" size="sm" className="text-xs">
                 Đăng nhập
               </Button>
             </Link>
-            <Link to="/auth/register">
+            <Link to="/register-center">
               <Button size="sm" className="shadow-sm shadow-primary/25 text-xs">
                 Đăng ký Trung tâm
               </Button>
@@ -129,14 +130,14 @@ export const PublicLayout: React.FC = () => {
                 </Button>
               </Link>
               <div className="grid grid-cols-2 gap-2">
-                <Link to="/auth/login" onClick={() => setMobileMenuOpen(false)}>
+                <Link to="/login" onClick={() => setMobileMenuOpen(false)}>
                   <Button variant="outline" className="w-full">
                     Đăng nhập
                   </Button>
                 </Link>
-                <Link to="/auth/register" onClick={() => setMobileMenuOpen(false)}>
+                <Link to="/register-center" onClick={() => setMobileMenuOpen(false)}>
                   <Button className="w-full">
-                    Đăng ký
+                    Đăng ký Trung tâm
                   </Button>
                 </Link>
               </div>

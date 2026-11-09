@@ -23,7 +23,7 @@ export const AISystemStudioPage: React.FC = () => {
 
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini')
   const [mockMode, setMockMode] = useState(true)
-  const [apiKey, setApiKey] = useState('AIzaSyD-mock-vietnam-edtech-key-2026')
+  const [apiKey, setApiKey] = useState('••••••••••••••••••••••••••••••••')
   const [rateLimitPerMinute, setRateLimitPerMinute] = useState('120')
   const [isSaving, setIsSaving] = useState(false)
 

@@ -26,6 +26,14 @@ const lessonPlanInputSchema = z.object({
   curriculumFocus: z.string().optional(),
 })
 
+const quizGenerateInputSchema = z.object({
+  passage: z.string().min(15, 'Đoạn văn bản/tài liệu bài đọc cần tối thiểu 15 ký tự'),
+  numQuestions: z.number().min(1).max(10).optional().default(4),
+  difficulty: z.string().optional().default('B2 / IELTS 6.5'),
+  topic: z.string().optional(),
+  assignmentId: z.string().optional(),
+})
+
 export class AIController {
   /**
    * POST /api/v1/ai/writing/evaluate
@@ -202,6 +210,66 @@ export class AIController {
       }
 
       sendSuccess(res, result, 'Khởi tạo giáo án và bộ câu hỏi trắc nghiệm bằng AI thành công')
+    } catch (error) {
+      next(error)
+    }
+  }
+
+  /**
+   * POST /api/v1/ai/teacher/quiz-generate
+   * Generates multiple-choice quiz questions from an excerpt/passage
+   */
+  static async generateQuizFromPassage(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = quizGenerateInputSchema.parse(req.body)
+      const user = req.user
+
+      const result = await AIService.generateQuizFromPassage(validated.passage, {
+        numQuestions: validated.numQuestions,
+        difficulty: validated.difficulty,
+        topic: validated.topic,
+      })
+
+      // Deduct AI Quota from tenant
+      if (user) {
+        await AIService.checkAndDeductQuota(
+          user.tenantId,
+          user.id,
+          'QUIZ_GEN',
+          result.tokensUsed
+        )
+      }
+
+      // If assignmentId is provided, save questions to DB
+      if (validated.assignmentId) {
+        try {
+          const assignment = await prisma.assignment.findUnique({
+            where: { id: validated.assignmentId },
+          })
+
+          if (assignment) {
+            // Delete existing questions or append
+            for (let i = 0; i < result.questions.length; i++) {
+              const q = result.questions[i]
+              await prisma.question.create({
+                data: {
+                  assignmentId: validated.assignmentId,
+                  prompt: q.prompt,
+                  options: JSON.stringify(q.options),
+                  correctAnswer: q.correctAnswer,
+                  explanation: q.explanation,
+                  points: q.points || 1.0,
+                  orderIndex: i + 1,
+                },
+              })
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Could not persist questions to DB:', dbErr)
+        }
+      }
+
+      sendSuccess(res, result, 'Tạo bộ câu hỏi trắc nghiệm bằng AI thành công')
     } catch (error) {
       next(error)
     }

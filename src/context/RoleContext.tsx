@@ -5,10 +5,10 @@ import { RoleContext } from './role-context-def'
 import { apiClient } from '@/lib/api-client'
 
 const personaCredentials: Record<UserRoleType, { email: string; pass: string }> = {
-  SUPER_ADMIN: { email: 'superadmin@englishflow.vn', pass: '123456' },
-  CENTER_MANAGER: { email: 'manager.hn@englishflow.vn', pass: '123456' },
-  TEACHER: { email: 'teacher.david@englishflow.vn', pass: '123456' },
-  STUDENT: { email: 'student.nam@englishflow.vn', pass: '123456' },
+  SUPER_ADMIN: { email: 'superadmin@englishflow.vn', pass: '030308' },
+  CENTER_MANAGER: { email: 'manager.hn@englishflow.vn', pass: '030308' },
+  TEACHER: { email: 'teacher.david@englishflow.vn', pass: '030308' },
+  STUDENT: { email: 'student.nam@englishflow.vn', pass: '030308' },
 }
 
 const getRoleLabel = (r: string): string => {

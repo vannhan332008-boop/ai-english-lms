@@ -46,6 +46,13 @@ model Tenant {
   planId          String?
   subscriptionPlan SubscriptionPlan? @relation(fields: [planId], references: [id])
 
+  // White-label & Custom Branding (P17)
+  logoUrl         String?
+  primaryColor    String       @default("#4f46e5")
+  secondaryColor  String       @default("#06b6d4")
+  faviconUrl      String?
+  customDomain    String?
+
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -59,6 +66,13 @@ model Tenant {
   aiUsageLogs     AIUsageLog[]
   flashcardDecks  FlashcardDeck[]
   materials       Material[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  invoices        Invoice[]
+  transactions    Transaction[]
+  liveSessions    LiveSession[]
+  reviews         Review[]
+  certificates    Certificate[]
 
   @@index([code])
 }
@@ -125,6 +139,7 @@ model User {
   streakDays      Int       @default(0)
   lastActiveAt    DateTime?
   isActive        Boolean   @default(true)
+  pushSubscription String?   // Serialized Web Push Subscription (JSON: endpoint, keys)
 
   // Tenant reference (Null for global SUPER_ADMIN)
   tenantId        String?
@@ -141,6 +156,12 @@ model User {
   aiUsageLogs         AIUsageLog[]
   flashcardProgresses FlashcardProgress[]
   flashcardReviews    FlashcardReview[]
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+  invoices            Invoice[]
+  teachingSessions    LiveSession[]
+  reviews             Review[]
+  certificates        Certificate[]
 
   @@index([tenantId])
   @@index([role])
@@ -185,10 +206,17 @@ model Course {
 
   classes         Class[]
   modules         Module[]
+  materials       Material[]
   exams           Exam[]
   flashcardDecks  FlashcardDeck[]
+  invoices        Invoice[]
+  liveSessions    LiveSession[]
+  reviews         Review[]
+  certificates    Certificate[]
 
   @@index([tenantId])
+  @@index([code])
+  @@index([type])
 }
 
 enum ClassStatus {
@@ -218,6 +246,7 @@ model Class {
 
   enrollments     Enrollment[]
   assignments     Assignment[]
+  liveSessions    LiveSession[]
 
   @@index([tenantId])
   @@index([courseId])
@@ -275,18 +304,24 @@ model Lesson {
 }
 
 model Material {
-  id        String   @id @default(cuid())
-  lessonId  String?
-  lesson    Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  title     String
-  fileType  String   // "PDF", "AUDIO", "DOCUMENT", "IMAGE"
-  fileUrl   String
-  fileSize  Int?     // bytes
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  courseId    String?
+  course      Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessonId    String?
+  lesson      Lesson?  @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  fileType    String   // "PDF", "AUDIO", "DOCUMENT", "IMAGE", "VIDEO"
+  fileUrl     String
+  storagePath String?
+  mimeType    String?
+  fileSize    Int?     // bytes
+  createdAt   DateTime @default(now())
 
   @@index([tenantId])
+  @@index([courseId])
   @@index([lessonId])
 }
 
@@ -316,6 +351,7 @@ model Assignment {
   createdAt    DateTime       @default(now())
 
   submissions  Submission[]
+  questions    Question[]
 
   @@index([tenantId])
   @@index([classId])
@@ -356,8 +392,10 @@ enum QuestionType {
 
 model Question {
   id            String       @id @default(cuid())
-  examId        String
-  exam          Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId        String?
+  exam          Exam?        @relation(fields: [examId], references: [id], onDelete: Cascade)
+  assignmentId  String?
+  assignment    Assignment?  @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   questionType  QuestionType @default(MULTIPLE_CHOICE)
   prompt        String
   mediaUrl      String?
@@ -368,6 +406,7 @@ model Question {
   orderIndex    Int          @default(1)
 
   @@index([examId])
+  @@index([assignmentId])
 }
 
 enum SubmissionStatus {
@@ -393,6 +432,10 @@ model Submission {
   score               Float?             // Final score (e.g. 7.5)
   aiScore             Float?             // Raw AI estimated score
   aiFeedback          String?            // Quick AI feedback summary
+  rubricScores        String?            // JSON string with criterion-by-criterion breakdown
+  answers             String?            // JSON string of submitted answers for quiz
+  isDraft             Boolean            @default(false)
+  isLate              Boolean            @default(false)
   status              SubmissionStatus   @default(SUBMITTED)
   teacherFeedback     String?
   submittedAt         DateTime           @default(now())
@@ -405,6 +448,7 @@ model Submission {
   @@index([assignmentId])
   @@index([examId])
   @@index([studentId])
+  @@index([status])
 }
 
 // -------------------------------------------------------------
@@ -425,6 +469,8 @@ model WritingEvaluation {
   detailedFeedback     String     // JSON structured strengths/weaknesses
   errorList            String     // JSON list of grammatical/lexical errors with line & suggestion
   createdAt            DateTime   @default(now())
+
+  @@index([submissionId])
 }
 
 model SpeakingEvaluation {
@@ -441,6 +487,8 @@ model SpeakingEvaluation {
   ipaErrors           String     // JSON array of mispronounced words with target IPA vs detected IPA
   detailedFeedback    String     // JSON text feedback
   createdAt           DateTime   @default(now())
+
+  @@index([submissionId])
 }
 
 model FlashcardDeck {
@@ -458,6 +506,7 @@ model FlashcardDeck {
   cards       Flashcard[]
 
   @@index([tenantId])
+  @@index([courseId])
 }
 
 model Flashcard {
@@ -518,3 +567,210 @@ model FlashcardReview {
   @@index([cardId])
   @@index([nextReviewDate])
 }
+
+// -------------------------------------------------------------
+// 10. Audit & Governance Logging (P08)
+// -------------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String   // e.g. "STUDENT_IMPORT_CSV", "CLASS_TRANSFER", "USER_STATUS_TOGGLE", "TENANT_PROFILE_UPDATE", "TEACHER_CREATE", "STUDENT_CREATE"
+  resource    String   // e.g. "USER", "ENROLLMENT", "TENANT"
+  resourceId  String?
+  details     String?  // JSON stringified details
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([action])
+}
+
+// -------------------------------------------------------------
+// 11. In-App Notifications (P12)
+// -------------------------------------------------------------
+
+model Notification {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, ASSIGNMENT, GRADE, SYSTEM, REMINDER
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([isRead])
+}
+
+// -------------------------------------------------------------
+// 12. Payment & Invoicing (P14)
+// -------------------------------------------------------------
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  VNPAY
+  MOMO
+  BANK_TRANSFER
+  STRIPE
+  CASH
+}
+
+enum TransactionStatus {
+  INITIALIZED
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  code            String        @unique // e.g. "INV-2026-00123"
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         User          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  classId         String?
+  
+  amount          Float
+  discountAmount  Float         @default(0.0)
+  finalAmount     Float
+  status          InvoiceStatus @default(PENDING)
+  paymentMethod   PaymentMethod @default(VNPAY)
+  notes           String?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  transactions    Transaction[]
+
+  @@index([tenantId])
+  @@index([studentId])
+  @@index([courseId])
+  @@index([status])
+  @@index([code])
+}
+
+model Transaction {
+  id              String            @id @default(cuid())
+  invoiceId       String
+  invoice         Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tenantId        String
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  paymentMethod   PaymentMethod     @default(VNPAY)
+  amount          Float
+  status          TransactionStatus @default(INITIALIZED)
+  gatewayTxnId    String?           // Transaction ID from VNPay/Stripe/MoMo
+  gatewayResponse String?           // Full webhook payload or gateway response
+  signature       String?           // Gateway signature verified
+  errorMessage    String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([gatewayTxnId])
+}
+
+enum MeetingPlatform {
+  GOOGLE_MEET
+  ZOOM
+  MICROSOFT_TEAMS
+  INTERNAL_ROOM
+}
+
+model LiveSession {
+  id              String          @id @default(cuid())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  classId         String?
+  class           Class?          @relation(fields: [classId], references: [id], onDelete: SetNull)
+  teacherId       String?
+  teacher         User?           @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+
+  title           String
+  description     String?
+  startTime       DateTime
+  endTime         DateTime
+  meetingUrl      String
+  meetingPlatform MeetingPlatform @default(GOOGLE_MEET)
+  isCancelled     Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@index([courseId])
+  @@index([classId])
+  @@index([teacherId])
+  @@index([startTime])
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  rating      Int      @default(5) // 1 to 5 stars
+  comment     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([courseId, studentId])
+  @@index([tenantId])
+  @@index([courseId])
+  @@index([studentId])
+}
+
+model Certificate {
+  id              String   @id @default(cuid())
+  code            String   @unique // e.g. "CERT-2026-EF-ABCDE"
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  certificateUrl  String?
+  issueDate       DateTime @default(now())
+  grade           String?  // "Pass", "Merit", "Distinction", "IELTS 7.5+"
+  score           Float?   // e.g. 95.0
+  metadata        String?  // JSON string: completionDate, studentName, etc.
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([courseId, studentId])
+  @@index([tenantId])
+  @@index([courseId])
+  @@index([studentId])
+  @@index([code])
+}
+
+
+
+
+

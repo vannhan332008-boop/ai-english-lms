@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Sparkles,
   CheckCircle2,
@@ -18,6 +18,7 @@ import {
   Clock,
   Sliders,
   RefreshCw,
+  Loader2,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -30,6 +31,7 @@ import {
 } from '@/mocks/teacherPortal'
 import { useToast } from '@/hooks/useToast'
 import { apiClient } from '@/lib/api-client'
+import { assignmentService } from '@/services/assignmentService'
 
 export const TeacherGradingPage: React.FC = () => {
   const { success, info, error: toastError } = useToast()
@@ -49,6 +51,65 @@ export const TeacherGradingPage: React.FC = () => {
   const [scores, setScores] = useState({ ...currentSubmission?.aiScores })
   const [selectedError, setSelectedError] = useState<WritingErrorHighlight | SpeakingErrorHighlight | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isSavingGrade, setIsSavingGrade] = useState(false)
+
+  // Fetch live submissions for grading from Backend
+  useEffect(() => {
+    let isMounted = true
+    const fetchSubmissions = async () => {
+      try {
+        const liveSubs = await assignmentService.getSubmissionsForGrading()
+        if (isMounted && liveSubs && liveSubs.length > 0) {
+          const mapped: GradingSubmission[] = liveSubs.map((sub) => {
+            const isSpeaking = sub.assignment?.type === 'SPEAKING'
+            let parsedRubric: any = null
+            try {
+              parsedRubric = typeof sub.rubricScores === 'string' ? JSON.parse(sub.rubricScores) : sub.rubricScores
+            } catch {
+              parsedRubric = null
+            }
+
+            return {
+              id: sub.id,
+              studentId: sub.studentId,
+              studentName: sub.student?.fullName || 'Học viên',
+              studentAvatar: sub.student?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              className: sub.assignment?.class?.name || 'Lớp học',
+              assignmentTitle: sub.assignment?.title || 'Bài tập rèn luyện kỹ năng',
+              type: isSpeaking ? 'SPEAKING' : 'WRITING',
+              submittedAt: new Date(sub.submittedAt).toLocaleString('vi-VN'),
+              status: sub.status === 'TEACHER_APPROVED' ? 'APPROVED' : 'PENDING',
+              contentPrompt: sub.assignment?.title || 'Đề bài',
+              writingEssayText: !isSpeaking ? sub.content || '' : undefined,
+              speakingAudioUrl: isSpeaking ? sub.content || undefined : undefined,
+              teacherNote: sub.teacherFeedback || '',
+              aiScores: {
+                overallBand: sub.score || 7.0,
+                criterion1Name: isSpeaking ? 'Fluency & Coherence' : 'Task Response',
+                criterion1Score: parsedRubric?.criterion1Score ?? sub.score ?? 7.0,
+                criterion2Name: isSpeaking ? 'Lexical Resource' : 'Coherence & Cohesion',
+                criterion2Score: parsedRubric?.criterion2Score ?? sub.score ?? 7.0,
+                criterion3Name: isSpeaking ? 'Grammatical Range' : 'Lexical Resource',
+                criterion3Score: parsedRubric?.criterion3Score ?? sub.score ?? 7.0,
+                criterion4Name: isSpeaking ? 'Pronunciation' : 'Grammatical Range',
+                criterion4Score: parsedRubric?.criterion4Score ?? sub.score ?? 7.0,
+              },
+              aiGeneralFeedbackVi: sub.aiFeedback || 'Bài làm đã sẵn sàng cho chấm điểm.',
+            }
+          })
+          setSubmissions(mapped)
+          setTeacherFeedback(mapped[0]?.teacherNote || '')
+          setScores({ ...mapped[0]?.aiScores })
+        }
+      } catch (err) {
+        console.warn('Could not load grading queue from backend:', err)
+      }
+    }
+    void fetchSubmissions()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   // Sync state when switching submissions
   const handleSelectSubmission = (index: number) => {
@@ -76,6 +137,7 @@ export const TeacherGradingPage: React.FC = () => {
           content: currentSubmission.writingEssayText || '',
           prompt: currentSubmission.contentPrompt,
           rubricType: 'IELTS',
+          submissionId: currentSubmission.id,
         })
 
         const data = response.data?.data
@@ -134,6 +196,7 @@ export const TeacherGradingPage: React.FC = () => {
         formData.append('audio', audioBlob, 'speaking-sample.webm')
         formData.append('prompt', currentSubmission.contentPrompt)
         formData.append('rubricType', 'IELTS')
+        formData.append('submissionId', currentSubmission.id)
 
         const response = await apiClient.post('/ai/speaking/evaluate', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -198,24 +261,44 @@ export const TeacherGradingPage: React.FC = () => {
     }
   }
 
-  // Approve & Send Handler
-  const handleApproveAndSend = () => {
-    setSubmissions((prev) =>
-      prev.map((sub, idx) =>
-        idx === currentIndex
-          ? {
-              ...sub,
-              status: 'APPROVED',
-              teacherNote: teacherFeedback,
-              aiScores: { ...scores },
-            }
-          : sub
+  // Approve & Send Handler (Pessimistic Update)
+  const handleApproveAndSend = async () => {
+    setIsSavingGrade(true)
+    try {
+      if (!currentSubmission.id.startsWith('sub_') && !currentSubmission.id.startsWith('mock_')) {
+        await assignmentService.gradeSubmission(currentSubmission.id, {
+          score: scores.overallBand,
+          teacherFeedback,
+          rubricScores: scores,
+          status: 'TEACHER_APPROVED',
+        })
+      }
+
+      setSubmissions((prev) =>
+        prev.map((sub, idx) =>
+          idx === currentIndex
+            ? {
+                ...sub,
+                status: 'APPROVED',
+                teacherNote: teacherFeedback,
+                aiScores: { ...scores },
+              }
+            : sub
+        )
       )
-    )
-    success(
-      `Đã phê duyệt & gửi kết quả thành công!`,
-      `Điểm Overall Band ${scores.overallBand} và nhận xét đã gửi tới học viên ${currentSubmission.studentName}.`
-    )
+      success(
+        `Đã phê duyệt & lưu điểm thành công!`,
+        `Điểm Overall Band ${scores.overallBand} và nhận xét đã được lưu trên cơ sở dữ liệu cho học viên ${currentSubmission.studentName}.`
+      )
+    } catch (err: any) {
+      console.error('Failed to save grade:', err)
+      toastError(
+        'Không thể lưu điểm chấm',
+        err.response?.data?.message || 'Lỗi khi lưu điểm vào cơ sở dữ liệu.'
+      )
+    } finally {
+      setIsSavingGrade(false)
+    }
   }
 
   // Apply AI Suggestion into teacher notes
@@ -550,6 +633,17 @@ export const TeacherGradingPage: React.FC = () => {
               </Button>
             </div>
 
+            {/* Human-in-the-loop Banner */}
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+              <div className="space-y-0.5">
+                <span className="font-bold block">Bản nháp gợi ý từ AI Co-pilot (Human-in-the-loop)</span>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Điểm số và nhận xét dưới đây là dự thảo gợi ý. Thầy/Cô hãy kiểm tra, tùy chỉnh các thang điểm bên dưới và bấm "Phê duyệt & Trả kết quả" để công bố cho học viên.
+                </p>
+              </div>
+            </div>
+
             {/* AI Overall Score Box */}
             <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/20">
               <div>
@@ -744,11 +838,21 @@ export const TeacherGradingPage: React.FC = () => {
             <div className="pt-2">
               <Button
                 variant="primary"
+                disabled={isSavingGrade}
                 className="w-full h-11 text-sm font-bold gap-2 shadow-lg shadow-primary/20"
                 onClick={handleApproveAndSend}
               >
-                <Send className="w-4 h-4" />
-                Approve & Send to Student
+                {isSavingGrade ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Đang lưu điểm & gửi phản hồi...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Approve & Send to Student
+                  </>
+                )}
               </Button>
               <p className="text-[11px] text-center text-muted-foreground mt-2">
                 Sau khi gửi, học viên sẽ nhận thông báo trên app và điểm được lưu vào học bạ.

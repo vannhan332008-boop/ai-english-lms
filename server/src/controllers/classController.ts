@@ -5,7 +5,7 @@ import { sendSuccess, sendError } from '../utils/response.js'
 export class ClassController {
   static async getTenantClasses(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const rawTenantId = (req as any).tenantId || req.params.tenantId
+      const rawTenantId = (req as any).tenantId || req.user?.tenantId || req.params.tenantId
       const tenantId = Array.isArray(rawTenantId) ? rawTenantId[0] : rawTenantId
       if (!tenantId) {
         sendError(res, 'Mã trung tâm (tenantId) là bắt buộc', 400)

@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
@@ -30,9 +31,9 @@ async function main() {
   await prisma.tenant.deleteMany()
   await prisma.subscriptionPlan.deleteMany()
 
-  // Hash common password '123456'
-  const passwordHash = await bcrypt.hash('123456', 10)
-  console.log('🔑 Common password hashed: 123456')
+  // Hash common password '030308'
+  const passwordHash = await bcrypt.hash('030308', 10)
+  console.log('🔑 Common password hashed: 030308')
 
   // 1. Create Subscription Plans
   console.log('📦 Creating Subscription Plans...')
@@ -125,7 +126,7 @@ async function main() {
   })
 
   // 5. Create Teacher for EnglishFlow HN
-  console.log('👨‍🏫 Creating Teacher for EnglishFlow HN...')
+  console.log('👨‍🏫 Creating Teachers for EnglishFlow HN...')
   const teacherDavid = await prisma.user.create({
     data: {
       email: 'teacher.david@englishflow.vn',
@@ -140,8 +141,22 @@ async function main() {
     },
   })
 
-  // 6. Create 2 Students for EnglishFlow HN
-  console.log('🎓 Creating 2 Students for EnglishFlow HN...')
+  const _teacher1 = await prisma.user.create({
+    data: {
+      email: 'teacher1@englishflow.vn',
+      passwordHash,
+      fullName: 'Tran Thi Huong (IELTS Instructor)',
+      role: 'TEACHER',
+      tenantId: tenantHN.id,
+      avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150',
+      phone: '0934567891',
+      cefrLevel: 'C1',
+      isActive: true,
+    },
+  })
+
+  // 6. Create Students for EnglishFlow HN
+  console.log('🎓 Creating Students for EnglishFlow HN...')
   const studentNam = await prisma.user.create({
     data: {
       email: 'student.nam@englishflow.vn',
@@ -168,6 +183,21 @@ async function main() {
       phone: '0989234567',
       cefrLevel: 'B1',
       streakDays: 8,
+      isActive: true,
+    },
+  })
+
+  const student1 = await prisma.user.create({
+    data: {
+      email: 'student1@gmail.com',
+      passwordHash,
+      fullName: 'Nguyen Van An (Student)',
+      role: 'STUDENT',
+      tenantId: tenantHN.id,
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+      phone: '0978999888',
+      cefrLevel: 'B2',
+      streakDays: 12,
       isActive: true,
     },
   })
@@ -216,6 +246,13 @@ async function main() {
         status: 'ENROLLED',
         attendanceRate: 91.0,
         finalGrade: 7.0,
+      },
+      {
+        classId: classK42.id,
+        studentId: student1.id,
+        status: 'ENROLLED',
+        attendanceRate: 98.0,
+        finalGrade: 8.0,
       },
     ],
   })
@@ -342,12 +379,14 @@ async function main() {
 
   console.log('✅ [EnglishFlow Seed] Seeding completed successfully!')
   console.log('--------------------------------------------------')
-  console.log('📋 MOCK ACCOUNTS (Mật khẩu chung: 123456):')
+  console.log('📋 MOCK ACCOUNTS (Mật khẩu chung: 030308):')
   console.log('👑 Super Admin    : superadmin@englishflow.vn')
   console.log('🏢 Center Manager : manager.hn@englishflow.vn (EnglishFlow HN)')
-  console.log('👨‍🏫 Teacher        : teacher.david@englishflow.vn')
-  console.log('🎓 Student 1      : student.nam@englishflow.vn')
-  console.log('🎓 Student 2      : student.mai@englishflow.vn')
+  console.log('👨‍🏫 Teacher 1      : teacher1@englishflow.vn (Quick login)')
+  console.log('👨‍🏫 Teacher David  : teacher.david@englishflow.vn')
+  console.log('🎓 Student 1      : student1@gmail.com (Quick login)')
+  console.log('🎓 Student Nam    : student.nam@englishflow.vn')
+  console.log('🎓 Student Mai    : student.mai@englishflow.vn')
   console.log('--------------------------------------------------')
 }
 

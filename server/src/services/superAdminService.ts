@@ -104,37 +104,51 @@ export class SuperAdminService {
       orderBy: { createdAt: 'desc' },
     })
 
-    // Enrich with count of teachers & students per tenant
-    const enrichedTenants = await Promise.all(
-      tenants.map(async (tenant) => {
-        const [studentCount, teacherCount] = await Promise.all([
-          prisma.user.count({ where: { tenantId: tenant.id, role: 'STUDENT' } }),
-          prisma.user.count({ where: { tenantId: tenant.id, role: 'TEACHER' } }),
-        ])
+    // Optimize N+1: Aggregate student & teacher counts across all tenants in a single batch query
+    const tenantIds = tenants.map((t) => t.id)
+    const userRoleCounts = await prisma.user.groupBy({
+      by: ['tenantId', 'role'],
+      where: {
+        tenantId: { in: tenantIds },
+        role: { in: ['STUDENT', 'TEACHER'] },
+      },
+      _count: { id: true },
+    })
 
-        return {
-          id: tenant.id,
-          name: tenant.name,
-          code: tenant.code,
-          domain: tenant.domain,
-          status: tenant.status,
-          city: tenant.city || 'Chưa thiết lập',
-          contactEmail: tenant.contactEmail,
-          contactPhone: tenant.contactPhone,
-          plan: tenant.plan || tenant.subscriptionPlan?.code || 'PROFESSIONAL',
-          planName: tenant.subscriptionPlan?.name || 'Professional Academy',
-          planPriceMonthly: tenant.subscriptionPlan?.priceMonthly || 12990000,
-          aiTokenQuota: tenant.aiTokenQuota,
-          aiTokensUsed: tenant.aiTokensUsed,
-          aiUsagePercent: tenant.aiTokenQuota > 0 ? Math.round((tenant.aiTokensUsed / tenant.aiTokenQuota) * 100) : 0,
-          studentCount,
-          teacherCount,
-          classCount: tenant._count.classes,
-          courseCount: tenant._count.courses,
-          createdAt: tenant.createdAt,
-        }
-      })
-    )
+    const countMap = new Map<string, { studentCount: number; teacherCount: number }>()
+    for (const item of userRoleCounts) {
+      if (!item.tenantId) continue
+      const current = countMap.get(item.tenantId) || { studentCount: 0, teacherCount: 0 }
+      if (item.role === 'STUDENT') current.studentCount = item._count.id
+      if (item.role === 'TEACHER') current.teacherCount = item._count.id
+      countMap.set(item.tenantId, current)
+    }
+
+    const enrichedTenants = tenants.map((tenant) => {
+      const counts = countMap.get(tenant.id) || { studentCount: 0, teacherCount: 0 }
+
+      return {
+        id: tenant.id,
+        name: tenant.name,
+        code: tenant.code,
+        domain: tenant.domain,
+        status: tenant.status,
+        city: tenant.city || 'Chưa thiết lập',
+        contactEmail: tenant.contactEmail,
+        contactPhone: tenant.contactPhone,
+        plan: tenant.plan || tenant.subscriptionPlan?.code || 'PROFESSIONAL',
+        planName: tenant.subscriptionPlan?.name || 'Professional Academy',
+        planPriceMonthly: tenant.subscriptionPlan?.priceMonthly || 12990000,
+        aiTokenQuota: tenant.aiTokenQuota,
+        aiTokensUsed: tenant.aiTokensUsed,
+        aiUsagePercent: tenant.aiTokenQuota > 0 ? Math.round((tenant.aiTokensUsed / tenant.aiTokenQuota) * 100) : 0,
+        studentCount: counts.studentCount,
+        teacherCount: counts.teacherCount,
+        classCount: tenant._count.classes,
+        courseCount: tenant._count.courses,
+        createdAt: tenant.createdAt,
+      }
+    })
 
     return enrichedTenants
   }

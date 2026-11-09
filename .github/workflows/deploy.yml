@@ -1,0 +1,127 @@
+name: EnglishFlow LMS CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22.x'
+
+jobs:
+  # ===============================================================
+  # Job 1: Frontend Type-check & Production Build
+  # ===============================================================
+  frontend-ci:
+    name: Frontend Quality & Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Run TypeScript Strict Type Check
+        run: npx tsc -b
+
+      - name: Build Optimized Production Bundle
+        env:
+          VITE_API_BASE_URL: ${{ secrets.PROD_API_BASE_URL || 'https://englishflow-api.onrender.com/api/v1' }}
+          VITE_APP_ENV: 'production'
+        run: npm run build
+
+      - name: Upload Frontend Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 7
+
+  # ===============================================================
+  # Job 2: Backend Prisma & TypeScript Build Check
+  # ===============================================================
+  backend-ci:
+    name: Backend Lint, Prisma & Build Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install Backend Dependencies
+        run: npm ci
+
+      - name: Generate Prisma ORM Client
+        run: npx prisma generate
+
+      - name: Run TypeScript Strict Compilation
+        run: npx tsc --noEmit
+
+      - name: Compile Backend Production JavaScript
+        run: npm run build
+
+      - name: Test Docker Container Build
+        run: docker build -t englishflow-api:test .
+
+  # ===============================================================
+  # Job 3: Automated Production Deployment (Only on main push)
+  # ===============================================================
+  deploy-production:
+    name: Production Deployment Release v1.0.0
+    needs: [frontend-ci, backend-ci]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Trigger Render / Backend Deploy Webhook
+        if: env.RENDER_DEPLOY_HOOK_URL != ''
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          echo "🚀 Triggering Backend deployment on Render..."
+          curl -X POST -f "$RENDER_DEPLOY_HOOK_URL"
+          echo "✅ Backend deploy signal sent successfully."
+
+      - name: Trigger Vercel / Frontend Deploy Webhook
+        if: env.VERCEL_DEPLOY_HOOK_URL != ''
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          echo "🌐 Triggering Frontend deployment on Vercel..."
+          curl -X POST -f "$VERCEL_DEPLOY_HOOK_URL"
+          echo "✅ Frontend deploy signal sent successfully."
+
+      - name: Release Summary
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🎉 EnglishFlow LMS v1.0.0 Released Successfully to Production!"
+          echo "Commit SHA : ${{ github.sha }}"
+          echo "Author     : ${{ github.actor }}"
+          echo "Ref        : ${{ github.ref }}"
+          echo "═══════════════════════════════════════════════════════"
+

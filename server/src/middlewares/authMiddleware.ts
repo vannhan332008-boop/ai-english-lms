@@ -38,6 +38,11 @@ export async function authenticate(
             status: true,
             aiTokenQuota: true,
             aiTokensUsed: true,
+            logoUrl: true,
+            primaryColor: true,
+            secondaryColor: true,
+            faviconUrl: true,
+            customDomain: true,
           },
         },
       },
@@ -57,7 +62,7 @@ export async function authenticate(
       email: user.email,
       fullName: user.fullName,
       role: user.role,
-      tenantId: user.tenantId,
+      tenantId: user.tenantId || decoded.tenantId || null,
       avatar: user.avatar,
       phone: user.phone,
       cefrLevel: user.cefrLevel,
@@ -74,3 +79,61 @@ export async function authenticate(
   }
 }
 
+export async function optionalAuthenticate(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers.authorization
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next()
+  }
+
+  const token = authHeader.split(' ')[1]
+
+  try {
+    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as TokenPayload
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            city: true,
+            status: true,
+            aiTokenQuota: true,
+            aiTokensUsed: true,
+            logoUrl: true,
+            primaryColor: true,
+            secondaryColor: true,
+            faviconUrl: true,
+            customDomain: true,
+          },
+        },
+      },
+    })
+
+    if (user && user.isActive) {
+      req.user = {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        tenantId: user.tenantId || decoded.tenantId || null,
+        avatar: user.avatar,
+        phone: user.phone,
+        cefrLevel: user.cefrLevel,
+        streakDays: user.streakDays,
+        tenant: user.tenant,
+      }
+    }
+  } catch {
+    // Ignore invalid/expired token for optional authentication
+  }
+
+  next()
+}

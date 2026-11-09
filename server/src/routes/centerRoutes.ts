@@ -13,10 +13,32 @@ centerRouter.use(
   enforceTenantIsolation
 )
 
+// Center Dashboard & Profile Management
 centerRouter.get('/stats', CenterManagerController.getStats)
+centerRouter.get('/profile', CenterManagerController.getProfile)
+centerRouter.put('/profile', CenterManagerController.updateProfile)
+
+// Teacher Management
 centerRouter.get('/teachers', CenterManagerController.getTeachers)
+centerRouter.post('/teachers', CenterManagerController.createTeacher)
+
+// Student Management
 centerRouter.get('/students', CenterManagerController.getStudents)
+centerRouter.post('/students', CenterManagerController.createStudent)
+centerRouter.post('/students/import-csv', CenterManagerController.importStudentsCsv)
+centerRouter.post('/students/:id/transfer-class', CenterManagerController.transferStudentClass)
+
+// User Directory & Creation
+centerRouter.get('/users', CenterManagerController.getUsers)
+centerRouter.post('/users', CenterManagerController.createUser)
+
+// User Account Status (Active/Inactive Toggle)
+centerRouter.patch('/users/:id/status', CenterManagerController.toggleUserStatus)
+
+// Class Directory
 centerRouter.get('/classes', CenterManagerController.getClasses)
 
-export default centerRouter
+// Governance Audit Logs
+centerRouter.get('/audit-logs', CenterManagerController.getAuditLogs)
 
+export default centerRouter

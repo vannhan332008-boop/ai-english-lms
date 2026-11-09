@@ -37,14 +37,16 @@ RUN apk add --no-cache openssl libc6-compat
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 RUN npx prisma generate
 
 # Copy built JavaScript files from builder stage
 COPY --from=builder /app/dist ./dist
 
-# Create uploads directory structure
-RUN mkdir -p uploads/audio uploads/documents
+# Create uploads and logs directory structure with proper permissions
+RUN mkdir -p uploads/audio uploads/documents logs && chown -R node:node /app
+
+USER node
 
 # Expose default HTTP server port
 EXPOSE 5000
@@ -55,4 +57,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Start production server
 CMD ["node", "dist/index.js"]
-

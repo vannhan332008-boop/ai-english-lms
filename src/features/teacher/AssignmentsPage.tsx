@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Plus,
@@ -8,6 +8,7 @@ import {
   Mic,
   CreditCard,
   ListChecks,
+  Loader2,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -22,20 +23,77 @@ import {
   type TeacherAssignment,
 } from '@/mocks/teacherPortal'
 import { useToast } from '@/hooks/useToast'
+import { assignmentService } from '@/services/assignmentService'
+import { AiQuizGeneratorModal } from '@/components/specific/AiQuizGeneratorModal'
+import api from '@/services/api'
 
 export const TeacherAssignmentsPage: React.FC = () => {
-  const { success, warning } = useToast()
+  const { success, warning, error: toastError } = useToast()
   const [assignments, setAssignments] = useState<TeacherAssignment[]>(mockTeacherAssignments)
+  const [classesList, setClassesList] = useState<{ id: string; name: string; totalStudents: number }[]>(mockTeacherClasses)
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'ESSAY_WRITING' | 'SPEAKING_RECORDING' | 'MULTIPLE_CHOICE' | 'FLASHCARD'>('ALL')
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isAiQuizModalOpen, setIsAiQuizModalOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   // Form State
   const [newTitle, setNewTitle] = useState('')
   const [selectedClassId, setSelectedClassId] = useState(mockTeacherClasses[0]?.id || '')
   const [newType, setNewType] = useState<'ESSAY_WRITING' | 'SPEAKING_RECORDING' | 'MULTIPLE_CHOICE' | 'FLASHCARD'>('ESSAY_WRITING')
-  const [newDeadline, setNewDeadline] = useState('05/11/2026 23:59')
+  const [newDeadline, setNewDeadline] = useState('2026-11-20T23:59')
   const [newInstructions, setNewInstructions] = useState('')
+
+  // Load classes and assignments from Backend API
+  const fetchAllData = async () => {
+    try {
+      const [classesRes, assignmentsRes] = await Promise.all([
+        api.get('/classes').catch(() => null),
+        assignmentService.getAssignments().catch(() => []),
+      ])
+
+      if (classesRes?.data?.data && classesRes.data.data.length > 0) {
+        const loadedClasses = classesRes.data.data.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          totalStudents: c._count?.enrollments || c.totalStudents || 25,
+        }))
+        setClassesList(loadedClasses)
+        setSelectedClassId((prev) => prev || loadedClasses[0].id)
+      }
+
+      if (assignmentsRes && assignmentsRes.length > 0) {
+        const mappedBackend: TeacherAssignment[] = assignmentsRes.map((asg) => {
+          let t: 'ESSAY_WRITING' | 'SPEAKING_RECORDING' | 'MULTIPLE_CHOICE' | 'FLASHCARD' = 'ESSAY_WRITING'
+          if (asg.type === 'SPEAKING') t = 'SPEAKING_RECORDING'
+          else if (asg.type === 'QUIZ') t = 'MULTIPLE_CHOICE'
+
+          const deadlineStr = asg.dueDate ? new Date(asg.dueDate).toLocaleString('vi-VN') : 'Không giới hạn'
+          const isClosed = asg.dueDate ? new Date() > new Date(asg.dueDate) : false
+
+          return {
+            id: asg.id,
+            title: asg.title,
+            className: asg.class?.name || 'Lớp học',
+            classId: asg.classId,
+            type: t,
+            deadline: deadlineStr,
+            totalAssigned: asg.totalAssigned || 25,
+            submittedCount: asg.submittedCount || 0,
+            gradedCount: asg.gradedCount || 0,
+            status: isClosed ? 'CLOSED' : 'OPEN',
+          }
+        })
+        setAssignments(mappedBackend)
+      }
+    } catch (err) {
+      console.warn('Failed to load live assignment data:', err)
+    }
+  }
+
+  useEffect(() => {
+    void fetchAllData()
+  }, [])
 
   // Filtered List
   const filteredAssignments = useMemo(() => {
@@ -48,36 +106,65 @@ export const TeacherAssignmentsPage: React.FC = () => {
     })
   }, [assignments, searchQuery, typeFilter])
 
-  const handleCreateAssignment = (e: React.FormEvent) => {
+  const handleCreateAssignment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTitle.trim()) {
       warning('Thiếu thông tin', 'Vui lòng nhập tiêu đề bài tập!')
       return
     }
 
-    const cls = mockTeacherClasses.find((c) => c.id === selectedClassId) || mockTeacherClasses[0]
-
-    const created: TeacherAssignment = {
-      id: `asg_${Date.now()}`,
-      title: newTitle,
-      className: cls.name,
-      classId: cls.id,
-      type: newType,
-      deadline: newDeadline,
-      totalAssigned: cls.totalStudents,
-      submittedCount: 0,
-      gradedCount: 0,
-      status: 'OPEN',
+    const cls = classesList.find((c) => c.id === selectedClassId) || classesList[0]
+    if (!cls) {
+      warning('Thiếu thông tin', 'Vui lòng chọn lớp học!')
+      return
     }
 
-    setAssignments([created, ...assignments])
-    success(
-      `Đã giao bài tập mới thành công!`,
-      `Bài tập "${created.title}" đã được gửi tới toàn bộ học viên lớp ${created.className}.`
-    )
-    setIsCreateModalOpen(false)
-    setNewTitle('')
-    setNewInstructions('')
+    setCreating(true)
+    try {
+      let backendType: 'WRITING' | 'SPEAKING' | 'QUIZ' | 'HOMEWORK' = 'WRITING'
+      if (newType === 'SPEAKING_RECORDING') backendType = 'SPEAKING'
+      else if (newType === 'MULTIPLE_CHOICE') backendType = 'QUIZ'
+      else if (newType === 'FLASHCARD') backendType = 'HOMEWORK'
+
+      const created = await assignmentService.createAssignment({
+        classId: cls.id,
+        title: newTitle.trim(),
+        description: newInstructions.trim() || undefined,
+        type: backendType,
+        dueDate: newDeadline ? new Date(newDeadline).toISOString() : undefined,
+      })
+
+      // Pessimistic Update: Add to list on successful 201 response
+      const newAsg: TeacherAssignment = {
+        id: created.id,
+        title: created.title,
+        className: cls.name,
+        classId: cls.id,
+        type: newType,
+        deadline: created.dueDate ? new Date(created.dueDate).toLocaleString('vi-VN') : 'Không giới hạn',
+        totalAssigned: cls.totalStudents,
+        submittedCount: 0,
+        gradedCount: 0,
+        status: 'OPEN',
+      }
+
+      setAssignments((prev) => [newAsg, ...prev])
+      success(
+        `Đã giao bài tập mới thành công!`,
+        `Bài tập "${created.title}" đã được lưu trữ và giao cho lớp ${cls.name}.`
+      )
+      setIsCreateModalOpen(false)
+      setNewTitle('')
+      setNewInstructions('')
+    } catch (err: any) {
+      console.error('Failed to create assignment:', err)
+      toastError(
+        'Không thể giao bài tập',
+        err.response?.data?.message || 'Lỗi kết nối máy chủ. Vui lòng kiểm tra lại.'
+      )
+    } finally {
+      setCreating(false)
+    }
   }
 
   const columns = [
@@ -209,10 +296,21 @@ export const TeacherAssignmentsPage: React.FC = () => {
           </p>
         </div>
 
-        <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 shrink-0">
-          <Plus className="w-4 h-4" />
-          Tạo bài tập mới
-        </Button>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <Button
+            variant="outline"
+            onClick={() => setIsAiQuizModalOpen(true)}
+            className="gap-2 text-primary border-primary/30 hover:bg-primary/10 shadow-sm"
+          >
+            <Sparkles className="w-4 h-4 text-primary" />
+            Tạo câu hỏi bằng AI
+          </Button>
+
+          <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 shrink-0">
+            <Plus className="w-4 h-4" />
+            Tạo bài tập mới
+          </Button>
+        </div>
       </div>
 
       {/* Filter Toolbar */}
@@ -289,7 +387,7 @@ export const TeacherAssignmentsPage: React.FC = () => {
               <Select
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
-                options={mockTeacherClasses.map((c) => ({
+                options={classesList.map((c) => ({
                   value: c.id,
                   label: `${c.name} (${c.totalStudents} HV)`,
                 }))}
@@ -340,15 +438,30 @@ export const TeacherAssignmentsPage: React.FC = () => {
           </div>
 
           <div className="flex justify-end gap-2.5 pt-3 border-t border-border/60">
-            <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)}>
+            <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)} disabled={creating}>
               Hủy
             </Button>
-            <Button type="submit" variant="primary">
-              Xác nhận giao bài
+            <Button type="submit" variant="primary" disabled={creating}>
+              {creating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                  Đang giao bài...
+                </>
+              ) : (
+                'Xác nhận giao bài'
+              )}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Modal: AI Tạo câu hỏi từ văn bản (P13) */}
+      <AiQuizGeneratorModal
+        isOpen={isAiQuizModalOpen}
+        onClose={() => setIsAiQuizModalOpen(false)}
+        classesList={classesList}
+        onSuccess={fetchAllData}
+      />
     </div>
   )
 }

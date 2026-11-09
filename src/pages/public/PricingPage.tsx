@@ -145,7 +145,7 @@ export const PricingPage: React.FC = () => {
                 </CardContent>
 
                 <div className="p-8 pt-0">
-                  <Link to="/contact">
+                  <Link to={`/register-center?plan=${plan.id}`}>
                     <Button
                       variant={plan.popular ? 'default' : 'outline'}
                       className="w-full h-11 text-xs font-bold shadow-sm"

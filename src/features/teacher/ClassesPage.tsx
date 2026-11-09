@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Users,
   Clock,
@@ -11,12 +11,22 @@ import {
   Save,
   Check,
   FileSpreadsheet,
+  Video,
+  Radio,
+  ExternalLink,
+  Calendar,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { mockTeacherClasses, type TeacherClassDetail, type StudentAttendance } from '@/mocks/teacherPortal'
+import {
+  liveSessionService,
+  type LiveSessionItem,
+  checkLiveSessionJoinStatus,
+} from '@/services/liveSessionService'
+import { LiveSessionModal } from '@/components/specific/LiveSessionModal'
 import { useToast } from '@/hooks/useToast'
 
 export const TeacherClassesPage: React.FC = () => {
@@ -24,6 +34,24 @@ export const TeacherClassesPage: React.FC = () => {
   const [classesList] = useState<TeacherClassDetail[]>(mockTeacherClasses)
   const [selectedClass, setSelectedClass] = useState<TeacherClassDetail | null>(null)
   const [attendanceData, setAttendanceData] = useState<Record<string, 'PRESENT' | 'ABSENT' | 'EXCUSED'>>({})
+
+  // Live Sessions State (P15)
+  const [liveSessions, setLiveSessions] = useState<LiveSessionItem[]>([])
+  const [isLiveModalOpen, setIsLiveModalOpen] = useState(false)
+  const [sessionToEdit, setSessionToEdit] = useState<LiveSessionItem | null>(null)
+
+  const fetchLiveSessions = async () => {
+    try {
+      const data = await liveSessionService.getLiveSessions()
+      setLiveSessions(data)
+    } catch (err) {
+      console.warn('Could not load teacher live sessions:', err)
+    }
+  }
+
+  useEffect(() => {
+    void fetchLiveSessions()
+  }, [])
 
   const handleOpenClassDetail = (cls: TeacherClassDetail) => {
     setSelectedClass(cls)
@@ -68,15 +96,122 @@ export const TeacherClassesPage: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          variant="outline"
-          className="gap-2 shrink-0 text-xs"
-          onClick={() => success('Đã tải xuất sổ điểm', 'Báo cáo điểm số toàn bộ 3 lớp đã được xuất file Excel.')}
-        >
-          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-          Xuất bảng điểm Excel
-        </Button>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <Button
+            variant="primary"
+            className="gap-2 text-xs bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20"
+            onClick={() => {
+              setSessionToEdit(null)
+              setIsLiveModalOpen(true)
+            }}
+          >
+            <Video className="w-4 h-4" />
+            Lên lịch Zoom / Meet
+          </Button>
+
+          <Button
+            variant="outline"
+            className="gap-2 text-xs"
+            onClick={() => success('Đã tải xuất sổ điểm', 'Báo cáo điểm số toàn bộ 3 lớp đã được xuất file Excel.')}
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            Xuất bảng điểm Excel
+          </Button>
+        </div>
       </div>
+
+      {/* Live Sessions Overview Card for Teachers */}
+      <Card className="p-5 border-border/80 shadow-sm bg-gradient-to-r from-rose-500/5 via-card to-card">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-rose-500 animate-pulse" />
+            <h2 className="text-base font-bold text-foreground">
+              Phòng Học Ảo & Lịch Dạy Trực Tuyến
+            </h2>
+            <Badge variant="outline" className="border-rose-500/30 text-rose-500 font-mono text-[11px]">
+              {liveSessions.length} Buổi học
+            </Badge>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            Học viên sẽ thấy nút "Vào lớp" trước giờ bắt đầu 15 phút
+          </span>
+        </div>
+
+        {liveSessions.length === 0 ? (
+          <div className="py-6 text-center text-xs text-muted-foreground">
+            Chưa có buổi học trực tuyến nào được lên lịch. Bấm "Lên lịch Zoom / Meet" để tạo phòng học ảo ngay.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-4">
+            {liveSessions.map((session) => {
+              const joinStatus = checkLiveSessionJoinStatus(session)
+              const start = new Date(session.startTime)
+              const end = new Date(session.endTime)
+
+              return (
+                <div
+                  key={session.id}
+                  className="p-3.5 rounded-xl border border-border/80 bg-background/50 hover:border-primary/40 transition flex flex-col justify-between gap-3 shadow-xs"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        {session.meetingPlatform === 'ZOOM' ? '🔵 Zoom' : '🟢 Meet'}
+                      </Badge>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          joinStatus.status === 'ACTIVE'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : joinStatus.status === 'UPCOMING'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {joinStatus.label}
+                      </span>
+                    </div>
+
+                    <h4 className="text-xs font-bold text-foreground line-clamp-1" title={session.title}>
+                      {session.title}
+                    </h4>
+
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <Calendar className="w-3 h-3 text-primary" />
+                      <span>
+                        {start.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })} •{' '}
+                        {start.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} -{' '}
+                        {end.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/50">
+                    <a
+                      href={session.meetingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-primary hover:underline inline-flex items-center gap-1"
+                    >
+                      Mở link phòng học
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+
+                    <button
+                      onClick={() => {
+                        setSessionToEdit(session)
+                        setIsLiveModalOpen(true)
+                      }}
+                      className="text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded bg-muted/50 hover:bg-muted transition"
+                    >
+                      Sửa
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
 
       {/* Class Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -290,6 +425,22 @@ export const TeacherClassesPage: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Live Session Creation / Edit Modal */}
+      <LiveSessionModal
+        isOpen={isLiveModalOpen}
+        onClose={() => setIsLiveModalOpen(false)}
+        sessionToEdit={sessionToEdit}
+        onSaved={(savedSession) => {
+          setLiveSessions((prev) => {
+            const exists = prev.some((s) => s.id === savedSession.id)
+            if (exists) {
+              return prev.map((s) => (s.id === savedSession.id ? savedSession : s))
+            }
+            return [savedSession, ...prev]
+          })
+        }}
+      />
     </div>
   )
 }

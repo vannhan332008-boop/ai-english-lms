@@ -59,7 +59,7 @@ export const Modal: React.FC<ModalProps> = ({
       {/* Dialog window */}
       <div
         className={cn(
-          'relative w-full rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-2xl transition-all animate-in zoom-in-95 duration-200 z-10 my-8',
+          'relative w-full max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:p-6 text-card-foreground shadow-2xl transition-all animate-in zoom-in-95 duration-200 z-10 my-auto',
           sizeClasses[size],
           className
         )}

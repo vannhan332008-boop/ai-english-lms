@@ -17,5 +17,8 @@ aiRouter.post('/speaking/evaluate', uploadAudio.single('audio'), AIController.ev
 // 3. AI Teacher Lesson Planner
 aiRouter.post('/teacher/lesson-plan', AIController.generateLessonPlan)
 
+// 4. AI Quiz Question Generator from Passage
+aiRouter.post('/teacher/quiz-generate', AIController.generateQuizFromPassage)
+
 export default aiRouter
 

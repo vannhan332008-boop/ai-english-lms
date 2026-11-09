@@ -1,26 +1,21 @@
 import { createApp } from './app.js'
 import { env } from './config/env.js'
 import { prisma } from './config/prisma.js'
+import { logger } from './utils/logger.js'
 
 const app = createApp()
 const PORT = parseInt(env.PORT, 10) || 5000
 
 const server = app.listen(PORT, () => {
-  console.log('=============================================================')
-  console.log(`🚀 EnglishFlow LMS Backend running at http://localhost:${PORT}`)
-  console.log(`📖 Swagger API Docs available at   http://localhost:${PORT}/api-docs`)
-  console.log(`❤️  Health check endpoint:          http://localhost:${PORT}/health`)
-  console.log(`🤖 AI Engine Mode:                 ${env.AI_MOCK_MODE ? 'MOCK_MODE (No API Key Required)' : 'LIVE'}`)
-  console.log(`📁 Database Location:              d:\\ai-english-lms\\server\\prisma\\dev.db`)
-  console.log('=============================================================')
+  logger.info(`[Server] EnglishFlow LMS Backend running at http://localhost:${PORT}`)
 })
 
 // Graceful Shutdown
 async function shutdown(signal: string) {
-  console.log(`\nReceived ${signal}. Shutting down gracefully...`)
+  logger.info(`[Server] Received ${signal}. Shutting down gracefully...`)
   server.close(async () => {
     await prisma.$disconnect()
-    console.log('Prisma disconnected. Server closed.')
+    logger.info('[Server] Prisma disconnected. Server closed.')
     process.exit(0)
   })
 }

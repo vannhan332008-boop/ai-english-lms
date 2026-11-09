@@ -6,9 +6,6 @@ import {
   GraduationCap,
   CheckCircle2,
   AlertTriangle,
-  Calendar,
-  Send,
-  ArrowUpRight,
   TrendingUp,
   RefreshCw,
   Sparkles,
@@ -16,6 +13,13 @@ import {
   AlertCircle,
   Clock,
   Phone,
+  Building2,
+  History,
+  Shield,
+  FileSpreadsheet,
+  ArrowRightLeft,
+  Download,
+  Receipt,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -31,8 +35,13 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Modal } from '@/components/ui/Modal'
+import { Input } from '@/components/ui/Input'
 import { useToast } from '@/hooks/useToast'
 import { apiClient } from '@/lib/api-client'
+import { centerService, type AuditLogItem } from '@/services/centerService'
+import { reportService } from '@/services/reportService'
+import { paymentService, type RevenueStats, type InvoiceItem } from '@/services/paymentService'
 
 interface CenterTenant {
   id: string
@@ -107,19 +116,62 @@ export const CenterManagerDashboard: React.FC = () => {
   const [centerData, setCenterData] = useState<{ tenant: CenterTenant; stats: CenterStats } | null>(null)
   const [students, setStudents] = useState<RealStudentItem[]>([])
   const [classes, setClasses] = useState<RealClassItem[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+
+  // Profile Modal state
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [isExporting, setIsExporting] = useState<string | null>(null)
+  const [revenueData, setRevenueData] = useState<RevenueStats | null>(null)
+  const [isInvoicesModalOpen, setIsInvoicesModalOpen] = useState(false)
+  const [invoicesList, setInvoicesList] = useState<InvoiceItem[]>([])
+
+  const handleExportStudents = async () => {
+    try {
+      setIsExporting('students')
+      await reportService.downloadStudentsCsv()
+      success('Xuất file thành công', 'File CSV danh sách học viên đã được tải xuống.')
+    } catch (err: any) {
+      toastError('Lỗi xuất file', err.response?.data?.message || err.message)
+    } finally {
+      setIsExporting(null)
+    }
+  }
+
+  const handleExportGrades = async () => {
+    try {
+      setIsExporting('grades')
+      await reportService.downloadGradesCsv()
+      success('Xuất file thành công', 'File CSV bảng điểm học viên đã được tải xuống.')
+    } catch (err: any) {
+      toastError('Lỗi xuất file', err.response?.data?.message || err.message)
+    } finally {
+      setIsExporting(null)
+    }
+  }
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    contactEmail: '',
+    contactPhone: '',
+    address: '',
+    city: '',
+  })
 
   const fetchDashboardData = useCallback(async (isManualRefresh = false) => {
     try {
       if (isManualRefresh) setIsRefreshing(true)
       setFetchError(null)
 
-      const [statsRes, studentsRes, classesRes] = await Promise.all([
+      const [statsRes, studentsRes, classesRes, logsData, revStats, invoicesRes] = await Promise.all([
         apiClient.get('/center/stats'),
         apiClient.get('/center/students'),
         apiClient.get('/center/classes'),
+        centerService.getAuditLogs(15).catch(() => []),
+        paymentService.getRevenueStats().catch(() => null),
+        paymentService.getInvoices({ limit: 50 }).catch(() => null),
       ])
 
       if (statsRes.data?.data) {
@@ -130,6 +182,13 @@ export const CenterManagerDashboard: React.FC = () => {
       }
       if (classesRes.data?.data && Array.isArray(classesRes.data.data)) {
         setClasses(classesRes.data.data)
+      }
+      setAuditLogs(logsData)
+      if (revStats) {
+        setRevenueData(revStats)
+      }
+      if (invoicesRes?.items) {
+        setInvoicesList(invoicesRes.items)
       }
 
       if (isManualRefresh) {
@@ -150,6 +209,39 @@ export const CenterManagerDashboard: React.FC = () => {
     void fetchDashboardData()
   }, [fetchDashboardData])
 
+  // Open profile modal and load current tenant details
+  const handleOpenProfileModal = async () => {
+    try {
+      const profile = await centerService.getProfile()
+      setProfileForm({
+        name: profile.name || '',
+        contactEmail: profile.contactEmail || '',
+        contactPhone: profile.contactPhone || '',
+        address: profile.address || '',
+        city: profile.city || '',
+      })
+      setIsProfileModalOpen(true)
+    } catch (err: any) {
+      toastError('Không thể lấy thông tin', err.message)
+    }
+  }
+
+  // Save profile update
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSavingProfile(true)
+    try {
+      const updated = await centerService.updateProfile(profileForm)
+      success('Cập nhật thành công!', `Thông tin cơ sở ${updated.name} đã được lưu.`)
+      setIsProfileModalOpen(false)
+      void fetchDashboardData()
+    } catch (err: any) {
+      toastError('Lỗi cập nhật', err.response?.data?.message || err.message)
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
+
   // Filter real at-risk students based on attendance rate < 80% or inactivity
   const atRiskStudents = students.filter((s) => s.attendanceRate < 80 || !s.isActive)
 
@@ -166,6 +258,25 @@ export const CenterManagerDashboard: React.FC = () => {
   const formatMillionVnd = (num: number) => {
     const million = num / 1000000
     return `${million.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} Tr đ`
+  }
+
+  const getActionBadge = (action: string) => {
+    switch (action) {
+      case 'STUDENT_IMPORT_CSV':
+        return <Badge variant="primary" className="text-[10px] gap-1"><FileSpreadsheet className="w-3 h-3" /> Import CSV</Badge>
+      case 'CLASS_TRANSFER':
+        return <Badge variant="warning" className="text-[10px] gap-1"><ArrowRightLeft className="w-3 h-3" /> Chuyển Lớp</Badge>
+      case 'USER_STATUS_TOGGLE':
+        return <Badge variant="outline" className="text-[10px] gap-1"><Shield className="w-3 h-3" /> Khóa/Mở Khóa</Badge>
+      case 'TENANT_PROFILE_UPDATE':
+        return <Badge variant="success" className="text-[10px] gap-1"><Building2 className="w-3 h-3" /> Sửa Hồ Sơ</Badge>
+      case 'TEACHER_CREATE':
+        return <Badge variant="primary" className="text-[10px]">Tạo Giảng Viên</Badge>
+      case 'STUDENT_CREATE':
+        return <Badge variant="success" className="text-[10px]">Tạo Học Viên</Badge>
+      default:
+        return <Badge variant="outline" className="text-[10px]">{action}</Badge>
+    }
   }
 
   // Dynamic Weekly Attendance trend based on real average attendance
@@ -211,20 +322,60 @@ export const CenterManagerDashboard: React.FC = () => {
               <Skeleton className="h-6 w-32 rounded-md" />
             ) : (
               <Badge variant="primary" className="text-xs px-2.5 py-0.5 font-bold">
-                {centerData?.tenant.name || 'EnglishFlow'}
+                {centerData?.tenant.name || 'EnglishFlow HN'}
               </Badge>
             )}
             <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30 flex items-center gap-1">
               <ShieldCheck className="w-3 h-3" />
-              <span>Multi-Tenant DB Connected</span>
+              <span>Multi-Tenant Supabase</span>
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1.5">
-            Dữ liệu vận hành thời gian thực từ Database SQLite: Học viên, Lớp học, Tỷ lệ chuyên cần và Hạn mức AI Token.
+            Dữ liệu vận hành thời gian thực: Học viên, Lớp học, Tỷ lệ chuyên cần, Hồ sơ cơ sở và Lịch sử Audit Log.
           </p>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsInvoicesModalOpen(true)}
+            className="gap-1.5 text-xs text-purple-600 border-purple-500/30 hover:bg-purple-500/10"
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            Sổ Hóa Đơn ({invoicesList.length})
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportStudents}
+            disabled={isExporting !== null}
+            className="gap-1.5 text-xs text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+            title="Xuất file CSV danh sách học viên (UTF-8 BOM chuẩn Excel)"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {isExporting === 'students' ? 'Đang xuất...' : 'CSV Học viên'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportGrades}
+            disabled={isExporting !== null}
+            className="gap-1.5 text-xs text-blue-600 border-blue-500/30 hover:bg-blue-500/10"
+            title="Xuất file CSV bảng điểm và tiến độ bài tập"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {isExporting === 'grades' ? 'Đang xuất...' : 'CSV Bảng điểm'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenProfileModal}
+            className="gap-1.5 text-xs text-primary border-primary/30 hover:bg-primary/10"
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            Hồ sơ cơ sở
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -298,154 +449,121 @@ export const CenterManagerDashboard: React.FC = () => {
             iconBg="bg-amber-500/10"
             trend={{
               value: `${(centerData?.tenant.aiTokensUsed ?? 0).toLocaleString()} / ${(centerData?.tenant.aiTokenQuota ?? 1000000).toLocaleString()}`,
-              label: 'tokens định mức tháng',
+              label: 'Token trong tháng',
               isPositive: (centerData?.tenant.aiUsagePercent ?? 0) < 80,
             }}
           />
           <StatCard
-            title="Tỷ Lệ Đi Học Chuyên Cần"
-            value={`${centerData?.stats.avgAttendance ?? 95.0}%`}
-            icon={CheckCircle2}
+            title="Doanh Thu Thu Được"
+            value={formatMillionVnd(revenueData?.totalRevenue ?? centerData?.stats.estimatedRevenue ?? 0)}
+            icon={TrendingUp}
             iconColor="text-purple-500"
             iconBg="bg-purple-500/10"
             trend={{
-              value: `${formatMillionVnd(centerData?.stats.estimatedRevenue ?? 0)}`,
-              label: 'ước tính học phí cơ sở',
+              value: `${revenueData?.paidCount ?? 0} Đã đóng`,
+              label: `${revenueData?.pendingCount ?? 0} Hóa đơn chờ thu`,
               isPositive: true,
             }}
           />
         </div>
       )}
 
-      {/* Row 2: At-Risk Students & Upcoming Classes */}
+      {/* Row 2: At-Risk Students & Ongoing Classes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* At-Risk Students Warning Section (2 cols) */}
-        <Card className="p-5 lg:col-span-2 border-border/80">
-          <div className="flex items-center justify-between pb-3 border-b border-border/60">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
+        {/* At-Risk Students Warning Card */}
+        <Card className="lg:col-span-2 p-5 border-border/80 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
               <div>
                 <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                  Học Viên Cần Lưu Ý Học Vụ
-                  <Badge variant={atRiskStudents.length > 0 ? 'danger' : 'success'} className="text-xs">
-                    {atRiskStudents.length} Học viên
-                  </Badge>
+                  <AlertTriangle className="w-4 h-4 text-rose-500" />
+                  Cảnh Báo Học Vụ & Chuyên Cần (Real-time Database)
                 </h2>
-                <p className="text-xs text-muted-foreground">
-                  Học viên vắng học trên 2 buổi (chuyên cần &lt; 80%) hoặc chưa hoàn thành bài tập thực hành AI
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Học viên có tỷ lệ chuyên cần &lt; 80% hoặc tài khoản bị tạm khóa cần can thiệp.
                 </p>
               </div>
+              <Badge variant={atRiskStudents.length > 0 ? 'danger' : 'success'}>
+                {atRiskStudents.length} Cần lưu ý
+              </Badge>
             </div>
 
-            <Link to="/center-manager/students">
-              <Button variant="ghost" size="sm" className="text-xs">
-                Xem tất cả
-                <ArrowUpRight className="w-3.5 h-3.5 ml-1" />
-              </Button>
-            </Link>
+            <div className="mt-4 space-y-3">
+              {atRiskStudents.length > 0 ? (
+                atRiskStudents.map((student) => (
+                  <div
+                    key={student.id}
+                    className="p-3.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200/80 dark:border-rose-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={student.avatar}
+                        alt={student.fullName}
+                        className="w-10 h-10 rounded-full object-cover ring-2 ring-rose-500/30"
+                      />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-foreground">{student.fullName}</span>
+                          <span className="text-xs text-rose-600 dark:text-rose-400 font-bold">
+                            Chuyên cần: {student.attendanceRate}%
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Lớp: {student.currentClass} • Target: {student.targetBand}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSendZaloAlert(student.fullName, student.phone)}
+                        className="h-8 text-xs gap-1 border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/50"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        Gửi Zalo
+                      </Button>
+                      <Link to="/center-manager/students">
+                        <Button size="sm" variant="ghost" className="h-8 text-xs">
+                          Xem hồ sơ
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center text-muted-foreground space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                  <p className="text-xs">
+                    Tuyệt vời! 100% học viên trong cơ sở đạt tỷ lệ chuyên cần trên 80%.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
-          {isLoading ? (
-            <div className="space-y-3 mt-4">
-              {[1, 2].map((i) => (
-                <div key={i} className="p-3 rounded-xl border border-border/60 space-y-2">
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="w-10 h-10 rounded-full" />
-                    <div className="space-y-1">
-                      <Skeleton className="w-32 h-4" />
-                      <Skeleton className="w-48 h-3" />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : atRiskStudents.length > 0 ? (
-            <div className="divide-y divide-border/60 mt-3">
-              {atRiskStudents.map((student) => (
-                <div
-                  key={student.id}
-                  className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-muted/40 p-2 rounded-xl transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    <img
-                      src={student.avatar}
-                      alt={student.fullName}
-                      className="w-10 h-10 rounded-full object-cover ring-2 ring-rose-500/40 shrink-0"
-                    />
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-foreground text-sm">{student.fullName}</span>
-                        <Badge variant="outline" className="text-[11px] font-mono">
-                          {student.currentClass}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px]">
-                          Mục tiêu {student.targetBand}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
-                        ⚠️ Chuyên cần thấp: {student.attendanceRate}% (Dưới ngưỡng chuẩn 80%)
-                      </p>
-                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          {student.phone}
-                        </span>
-                        <span>•</span>
-                        <span>Chuỗi học: {student.streakDays} ngày</span>
-                        <span>•</span>
-                        <span>Trình độ: CEFR {student.currentLevel}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs gap-1.5 text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
-                      onClick={() => handleSendZaloAlert(student.fullName, student.phone)}
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      Nhắn Zalo Phụ Huynh
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="py-8 text-center space-y-2">
-              <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-500 mx-auto flex items-center justify-center">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-bold text-foreground">Tình hình chuyên cần cơ sở rất tốt!</h3>
-              <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                Hiện không có học viên nào ở mức nguy cơ thụt lùi. Toàn bộ {students.length} học viên đang duy trì tỷ lệ đi học trên 80% và hoàn thành bài tập đúng hạn.
-              </p>
-            </div>
-          )}
+          <div className="pt-4 border-t border-border/60 mt-4 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Dữ liệu xác thực từ Supabase</span>
+            <Link to="/center-manager/students" className="font-semibold text-primary hover:underline">
+              Xem toàn bộ danh sách &rarr;
+            </Link>
+          </div>
         </Card>
 
-        {/* Classes List Column (1 col) */}
-        <Card className="p-5 flex flex-col justify-between border-border/80">
+        {/* Classes In Progress Card */}
+        <Card className="p-5 border-border/80 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-border/60">
               <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-primary" />
-                Lớp Học Tại Cơ Sở
+                <GraduationCap className="w-4 h-4 text-primary" />
+                Lớp Đang Giảng Dạy
               </h2>
-              <Badge variant="outline">{classes.length} Lớp</Badge>
+              <span className="text-xs text-muted-foreground">{classes.length} Lớp</span>
             </div>
 
-            {isLoading ? (
-              <div className="space-y-3 mt-3">
-                {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-20 w-full rounded-xl" />
-                ))}
-              </div>
-            ) : classes.length > 0 ? (
-              <div className="space-y-3 mt-3">
+            {activeClassesList.length > 0 ? (
+              <div className="mt-4 space-y-3">
                 {activeClassesList.map((cls) => {
                   const enrollmentsCount = cls._count?.enrollments ?? 0
                   const percent = Math.round((enrollmentsCount / (cls.maxStudents || 20)) * 100)
@@ -543,6 +661,215 @@ export const CenterManagerDashboard: React.FC = () => {
           </ResponsiveContainer>
         </div>
       </Card>
+
+      {/* Row 4: Governance Audit Logs (P08) */}
+      <Card className="p-5 border-border/80">
+        <div className="flex items-center justify-between pb-4 border-b border-border/60">
+          <div>
+            <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+              <History className="w-4 h-4 text-primary" />
+              Nhật Ký Quản Trị & Audit Log (Bảo Mật Cơ Sở)
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Theo dõi và lưu vết các thao tác quản trị nhạy cảm: Chuyển lớp, Nhập CSV, Khóa tài khoản, Cập nhật thông tin cơ sở.
+            </p>
+          </div>
+          <Badge variant="outline" className="text-xs">
+            {auditLogs.length} Bản ghi gần nhất
+          </Badge>
+        </div>
+
+        <div className="mt-4">
+          {auditLogs.length > 0 ? (
+            <div className="divide-y divide-border/60 max-h-72 overflow-y-auto">
+              {auditLogs.map((log) => {
+                let parsedDetails = ''
+                try {
+                  if (log.details) {
+                    const parsed = JSON.parse(log.details)
+                    parsedDetails = Object.entries(parsed)
+                      .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+                      .join(' • ')
+                  }
+                } catch {
+                  parsedDetails = log.details || ''
+                }
+
+                return (
+                  <div key={log.id} className="py-2.5 flex items-start justify-between gap-3 text-xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        {getActionBadge(log.action)}
+                        <span className="font-semibold text-foreground">
+                          {log.user ? `${log.user.fullName} (${log.user.role})` : 'Hệ thống'}
+                        </span>
+                      </div>
+                      {parsedDetails && (
+                        <p className="text-[11px] text-muted-foreground line-clamp-1">{parsedDetails}</p>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                      {new Date(log.createdAt).toLocaleString('vi-VN')}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-muted-foreground space-y-1">
+              <Shield className="w-7 h-7 mx-auto text-muted-foreground/40" />
+              <p className="text-xs">Chưa có bản ghi nhật ký kiểm toán nào.</p>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Modal: Update Center Profile */}
+      <Modal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        title="Cập Nhật Hồ Sơ Cơ Sở Trung Tâm"
+        description="Thông tin liên hệ chính thức hiển thị trên hệ thống và các văn bản học vụ"
+        size="md"
+      >
+        <form onSubmit={handleSaveProfile} className="space-y-4">
+          <Input
+            label="Tên cơ sở trung tâm *"
+            value={profileForm.name}
+            onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+            required
+            placeholder="VD: EnglishFlow Hà Nội - Premier Campus"
+          />
+
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Email liên hệ / CSKH"
+              type="email"
+              value={profileForm.contactEmail}
+              onChange={(e) => setProfileForm({ ...profileForm, contactEmail: e.target.value })}
+              placeholder="contact.hn@englishflow.vn"
+            />
+            <Input
+              label="Hotline trung tâm"
+              value={profileForm.contactPhone}
+              onChange={(e) => setProfileForm({ ...profileForm, contactPhone: e.target.value })}
+              placeholder="0243 999 6666"
+            />
+          </div>
+
+          <Input
+            label="Địa chỉ trụ sở cơ sở"
+            value={profileForm.address}
+            onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
+            placeholder="Keangnam Landmark 72, Phạm Hùng, Hà Nội"
+          />
+
+          <Input
+            label="Thành phố / Tỉnh"
+            value={profileForm.city}
+            onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
+            placeholder="Hà Nội"
+          />
+
+          <div className="pt-4 flex justify-end gap-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsProfileModalOpen(false)}
+              disabled={isSavingProfile}
+            >
+              Hủy
+            </Button>
+            <Button type="submit" variant="primary" disabled={isSavingProfile} className="gap-2">
+              {isSavingProfile ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Đang lưu...
+                </>
+              ) : (
+                'Lưu thay đổi'
+              )}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Sổ Hóa Đơn & Thu Học Phí Modal (P14) */}
+      <Modal
+        isOpen={isInvoicesModalOpen}
+        onClose={() => setIsInvoicesModalOpen(false)}
+        title="Sổ Hóa Đơn & Quản Lý Thu Học Phí"
+        description="Theo dõi toàn bộ các giao dịch đóng học phí của học viên, trạng thái thanh toán và cổng giao dịch."
+        size="xl"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl bg-muted/40 border border-border/60">
+            <div>
+              <span className="text-[11px] text-muted-foreground block">Tổng doanh thu thực nhận</span>
+              <span className="text-lg font-black text-emerald-600">
+                {((revenueData?.totalRevenue ?? 0) / 1000000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} Tr đ
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-muted-foreground block">Học phí đang chờ đóng</span>
+              <span className="text-lg font-black text-amber-500">
+                {((revenueData?.pendingRevenue ?? 0) / 1000000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} Tr đ
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-muted-foreground block">Số đơn hoàn tất</span>
+              <span className="text-lg font-black text-primary">
+                {revenueData?.paidCount ?? 0} Đã đóng ({revenueData?.pendingCount ?? 0} Chờ)
+              </span>
+            </div>
+          </div>
+
+          <div className="max-h-[380px] overflow-y-auto divide-y divide-border/60 rounded-xl border border-border/80">
+            {invoicesList.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground text-xs">
+                Chưa có hóa đơn nào phát sinh trong cơ sở này.
+              </div>
+            ) : (
+              invoicesList.map((inv) => (
+                <div key={inv.id} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card hover:bg-muted/30 transition-colors">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-xs text-foreground">{inv.code}</span>
+                      <Badge variant={inv.status === 'PAID' ? 'primary' : 'warning'} className="text-[10px]">
+                        {inv.status === 'PAID' ? 'ĐÃ THANH TOÁN' : 'CHỜ THANH TOÁN'}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        {inv.paymentMethod}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-foreground font-semibold">
+                      {inv.student.fullName} ({inv.student.email})
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Khóa học: {inv.course.title}
+                    </p>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="text-sm font-black text-primary block">
+                      {inv.finalAmount.toLocaleString('vi-VN')} đ
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {inv.paidAt ? `Ngày đóng: ${new Date(inv.paidAt).toLocaleDateString('vi-VN')}` : `Khởi tạo: ${new Date(inv.createdAt).toLocaleDateString('vi-VN')}`}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-border/60">
+            <Button variant="outline" onClick={() => setIsInvoicesModalOpen(false)}>
+              Đóng
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

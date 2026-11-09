@@ -2,11 +2,11 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import {
   Plus,
-  Star,
-  Award,
   Mail,
   Clock,
   RefreshCw,
+  CheckCircle2,
+  Lock,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -16,142 +16,164 @@ import { Select } from '@/components/ui/Select'
 import { Modal } from '@/components/ui/Modal'
 import { DataTable } from '@/components/ui/DataTable'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { mockTeachers, type TeacherRecord } from '@/mocks/teachers'
 import { useToast } from '@/hooks/useToast'
-import { apiClient } from '@/lib/api-client'
+import { centerService, type TeacherItem, type ClassItem } from '@/services/centerService'
 
 export const CenterManagerTeachersPage: React.FC = () => {
-  const { success, warning, info, error: toastError } = useToast()
-  const [teachers, setTeachers] = useState<TeacherRecord[]>([])
+  const { success, warning, error: toastError } = useToast()
+
+  const [teachers, setTeachers] = useState<TeacherItem[]>([])
+  const [classes, setClasses] = useState<ClassItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Filters
   const [searchQuery, setSearchQuery] = useState('')
-  const [specialtyFilter, setSpecialtyFilter] = useState<'ALL' | 'IELTS' | 'TOEIC' | 'COMMUNICATION'>('ALL')
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL')
+
+  // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [selectedTeacher, setSelectedTeacher] = useState<TeacherRecord | null>(null)
+  const [selectedTeacher, setSelectedTeacher] = useState<TeacherItem | null>(null)
 
   // Form State
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newPhone, setNewPhone] = useState('')
-  const [newQualification, setNewQualification] = useState('')
-  const [newSpecialty, setNewSpecialty] = useState<'IELTS' | 'TOEIC' | 'COMMUNICATION'>('IELTS')
+  const [newQualification, setNewQualification] = useState('IELTS 8.0, TESOL')
+  const [newCefrLevel, setNewCefrLevel] = useState<'B1' | 'B2' | 'C1' | 'C2'>('C1')
+  const [assignedClassId, setAssignedClassId] = useState('')
 
+  // Fetch Classes
+  const fetchClasses = useCallback(async () => {
+    try {
+      const data = await centerService.getClasses()
+      setClasses(data)
+    } catch (err) {
+      console.error('Failed to fetch classes:', err)
+    }
+  }, [])
+
+  // Fetch Teachers
   const fetchTeachers = useCallback(async (showToast = false) => {
     try {
       if (showToast) setIsRefreshing(true)
-      const res = await apiClient.get('/center/teachers')
-      if (res.data?.data && Array.isArray(res.data.data)) {
-        const apiTeachers: TeacherRecord[] = res.data.data.map((t: any) => ({
-          id: t.id,
-          name: t.fullName,
-          email: t.email,
-          phone: t.phone || '0934 567 890',
-          avatar: t.avatar || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
-          qualification: `IELTS 8.5 Master, CEFR ${t.cefrLevel}`,
-          nativeSpeaker: t.email.includes('david') || t.fullName.includes('David'),
-          teachingSpecialty: 'IELTS' as const,
-          assignedClasses: t.teachingClasses?.map((c: any) => c.name) || ['IELTS 7.5 - K42 Evening'],
-          activeStudents: t.totalStudentsTaught || 24,
-          hoursPerWeek: 18,
-          rating: 4.95,
-          status: (t.isActive ? 'ACTIVE' : 'ON_LEAVE') as 'ACTIVE' | 'ON_LEAVE',
-          joinedDate: new Date(t.createdAt).toLocaleDateString('vi-VN'),
-        }))
-
-        // Merge with mock teachers for full UI showcase
-        const combined = [...apiTeachers]
-        mockTeachers.forEach((m) => {
-          if (!combined.some((c) => c.email === m.email)) {
-            combined.push(m)
-          }
-        })
-
-        setTeachers(combined)
-        if (showToast) {
-          success('Đã tải danh sách giáo viên', `Đồng bộ ${apiTeachers.length} giảng viên từ cơ sở dữ liệu.`)
-        }
+      const data = await centerService.getTeachers()
+      setTeachers(data)
+      if (showToast) {
+        success('Đã tải danh sách giáo viên', `Đồng bộ ${data.length} giảng viên từ cơ sở dữ liệu.`)
       }
     } catch (err: any) {
-      console.warn('Could not fetch teachers via API, falling back to mock:', err)
+      console.error('Could not fetch teachers via API:', err)
       if (showToast) {
         toastError('Lỗi kết nối API', err.response?.data?.message || err.message)
       }
-      setTeachers((prev) => (prev.length === 0 ? mockTeachers : prev))
     } finally {
       setIsLoading(false)
       setIsRefreshing(false)
     }
   }, [success, toastError])
 
-  // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => {
+    void fetchClasses()
     void fetchTeachers()
-  }, [fetchTeachers])
+  }, [fetchClasses, fetchTeachers])
 
   // Filter logic
   const filteredTeachers = useMemo(() => {
     return teachers.filter((t) => {
       const matchSearch =
-        t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.qualification.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchSpec = specialtyFilter === 'ALL' || t.teachingSpecialty === specialtyFilter
-      return matchSearch && matchSpec
-    })
-  }, [teachers, searchQuery, specialtyFilter])
+        (t.phone && t.phone.toLowerCase().includes(searchQuery.toLowerCase()))
 
-  const handleAddTeacher = (e: React.FormEvent) => {
+      const matchStatus =
+        statusFilter === 'ALL' ||
+        (statusFilter === 'ACTIVE' && t.isActive) ||
+        (statusFilter === 'INACTIVE' && !t.isActive)
+
+      return matchSearch && matchStatus
+    })
+  }, [teachers, searchQuery, statusFilter])
+
+  // Create Teacher API
+  const handleAddTeacher = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newName.trim() || !newEmail.trim()) {
       warning('Thiếu thông tin', 'Vui lòng điền họ tên và email giáo viên!')
       return
     }
 
-    const created: TeacherRecord = {
-      id: `tch_${Date.now()}`,
-      name: newName,
-      email: newEmail,
-      phone: newPhone || '0901 234 567',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-      qualification: newQualification || 'IELTS 8.0, TESOL Certificate',
-      nativeSpeaker: false,
-      teachingSpecialty: newSpecialty,
-      assignedClasses: ['Lớp học thử nghiệm'],
-      activeStudents: 20,
-      hoursPerWeek: 16,
-      rating: 5.0,
-      status: 'ACTIVE',
-      joinedDate: new Date().toLocaleDateString('vi-VN'),
-    }
+    setIsSubmitting(true)
+    try {
+      await centerService.createTeacher({
+        fullName: newName.trim(),
+        email: newEmail.trim(),
+        phone: newPhone.trim() || undefined,
+        cefrLevel: newCefrLevel,
+        qualification: newQualification.trim(),
+        assignedClassId: assignedClassId || undefined,
+      })
 
-    setTeachers([created, ...teachers])
-    success(`Đã thêm giảng viên mới: ${created.name}`, 'Tài khoản giáo vụ và AI Assistant đã được kích hoạt.')
-    setIsModalOpen(false)
-    setNewName('')
-    setNewEmail('')
-    setNewQualification('')
+      success(
+        'Đã thêm giảng viên mới thành công!',
+        `Tài khoản cho ${newName} đã được tạo với mật khẩu khởi tạo 030308.`
+      )
+      setIsModalOpen(false)
+      setNewName('')
+      setNewEmail('')
+      setNewPhone('')
+      setAssignedClassId('')
+      void fetchTeachers()
+      void fetchClasses()
+    } catch (err: any) {
+      toastError(
+        'Lỗi tạo giảng viên',
+        err.response?.data?.message || err.message || 'Không thể tạo giảng viên'
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Toggle Teacher Status API
+  const handleToggleStatus = async (teacher: TeacherItem) => {
+    try {
+      const nextStatus = !teacher.isActive
+      await centerService.toggleUserStatus(teacher.id, nextStatus)
+      setTeachers((prev) =>
+        prev.map((t) => (t.id === teacher.id ? { ...t, isActive: nextStatus } : t))
+      )
+      success(
+        'Đã cập nhật trạng thái',
+        `Giảng viên ${teacher.fullName} đã chuyển sang ${nextStatus ? 'HOẠT ĐỘNG' : 'ĐÃ TẠM KHÓA'}.`
+      )
+    } catch (err: any) {
+      toastError('Lỗi cập nhật', err.response?.data?.message || err.message || 'Không thể đổi trạng thái')
+    }
   }
 
   const columns = [
     {
       key: 'name',
       header: 'Họ và tên Giảng viên',
-      render: (t: TeacherRecord) => (
+      render: (t: TeacherItem) => (
         <div className="flex items-center gap-3">
           <img
-            src={t.avatar}
-            alt={t.name}
-            className="w-10 h-10 rounded-full object-cover ring-2 ring-primary/20 shrink-0"
+            src={t.avatar || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150'}
+            alt={t.fullName}
+            className={`w-10 h-10 rounded-full object-cover ring-2 shrink-0 ${
+              t.isActive ? 'ring-primary/20' : 'ring-rose-500/40 opacity-70'
+            }`}
           />
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-foreground text-sm">{t.name}</span>
-              {t.nativeSpeaker && (
-                <Badge variant="primary" className="text-[10px] px-1 py-0">
-                  Native
-                </Badge>
-              )}
+              <span className={`font-bold text-sm ${t.isActive ? 'text-foreground' : 'text-muted-foreground line-through'}`}>
+                {t.fullName}
+              </span>
+              <Badge variant="primary" className="text-[10px] px-1 py-0">
+                CEFR {t.cefrLevel}
+              </Badge>
             </div>
             <span className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
               <Mail className="w-3 h-3 text-muted-foreground" />
@@ -162,68 +184,54 @@ export const CenterManagerTeachersPage: React.FC = () => {
       ),
     },
     {
-      key: 'qualification',
-      header: 'Bằng cấp & Chứng chỉ',
-      render: (t: TeacherRecord) => (
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-            <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span className="line-clamp-1">{t.qualification}</span>
-          </div>
-          <Badge variant="outline" className="text-[11px]">
-            Chuyên ngành: {t.teachingSpecialty}
-          </Badge>
-        </div>
-      ),
-    },
-    {
       key: 'classes',
-      header: 'Lớp đang dạy & Học viên',
-      render: (t: TeacherRecord) => (
+      header: 'Lớp phụ trách & Học viên',
+      render: (t: TeacherItem) => (
         <div>
           <span className="font-semibold text-foreground text-sm block">
-            {t.assignedClasses.length} lớp ({t.activeStudents} học viên)
+            {t.activeClassesCount} lớp đang dạy ({t.totalStudentsTaught} học viên)
           </span>
           <span className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
             <Clock className="w-3 h-3" />
-            {t.hoursPerWeek} giờ / tuần
+            Tham gia: {new Date(t.createdAt).toLocaleDateString('vi-VN')}
           </span>
-        </div>
-      ),
-    },
-    {
-      key: 'rating',
-      header: 'Đánh giá học viên',
-      render: (t: TeacherRecord) => (
-        <div className="flex items-center gap-1.5">
-          <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-          <span className="font-bold text-foreground text-sm">{t.rating.toFixed(2)}</span>
-          <span className="text-xs text-muted-foreground">/ 5.0</span>
         </div>
       ),
     },
     {
       key: 'status',
-      header: 'Trạng thái',
-      render: (t: TeacherRecord) => (
-        <Badge variant={t.status === 'ACTIVE' ? 'success' : 'warning'}>
-          {t.status === 'ACTIVE' ? 'Đang giảng dạy' : 'Nghỉ phép'}
-        </Badge>
+      header: 'Trạng thái hoạt động',
+      render: (t: TeacherItem) => (
+        <button
+          type="button"
+          onClick={() => handleToggleStatus(t)}
+          className="group flex items-center gap-1.5 text-left"
+          title="Nhấn để đổi trạng thái kích hoạt tài khoản"
+        >
+          {t.isActive ? (
+            <Badge variant="success" className="gap-1 text-[11px] cursor-pointer group-hover:bg-emerald-600 transition-colors">
+              <CheckCircle2 className="w-3 h-3" />
+              Đang giảng dạy
+            </Badge>
+          ) : (
+            <Badge variant="danger" className="gap-1 text-[11px] cursor-pointer group-hover:bg-rose-600 transition-colors">
+              <Lock className="w-3 h-3" />
+              Đã tạm khóa
+            </Badge>
+          )}
+        </button>
       ),
     },
     {
       key: 'actions',
       header: 'Thao tác',
       align: 'right' as const,
-      render: (t: TeacherRecord) => (
+      render: (t: TeacherItem) => (
         <Button
           variant="outline"
           size="sm"
           className="h-8 text-xs"
-          onClick={() => {
-            setSelectedTeacher(t)
-            info(`Hồ sơ giảng viên: ${t.name}`, `Đang tải lịch giảng dạy và đánh giá feedback.`)
-          }}
+          onClick={() => setSelectedTeacher(t)}
         >
           Xem hồ sơ
         </Button>
@@ -243,7 +251,7 @@ export const CenterManagerTeachersPage: React.FC = () => {
             <Badge variant="primary">{teachers.length} Giảng viên</Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Quản trị hồ sơ chuyên môn, lịch giảng dạy và năng suất hỗ trợ học viên với AI Co-pilot của giáo viên.
+            Quản trị danh sách giảng viên trực thuộc cơ sở, cấp tài khoản và phân quyền giảng dạy.
           </p>
         </div>
 
@@ -270,7 +278,7 @@ export const CenterManagerTeachersPage: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
           <div className="flex-1">
             <Input
-              placeholder="Tìm theo tên giảng viên, email, chứng chỉ..."
+              placeholder="Tìm theo tên giảng viên, email, số điện thoại..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -278,13 +286,12 @@ export const CenterManagerTeachersPage: React.FC = () => {
 
           <div className="w-full md:w-56">
             <Select
-              value={specialtyFilter}
-              onChange={(e) => setSpecialtyFilter(e.target.value as any)}
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
               options={[
-                { value: 'ALL', label: 'Tất cả chuyên môn' },
-                { value: 'IELTS', label: 'Chuyên IELTS' },
-                { value: 'TOEIC', label: 'Chuyên TOEIC' },
-                { value: 'COMMUNICATION', label: 'Tiếng Anh Giao Tiếp' },
+                { value: 'ALL', label: 'Tất cả trạng thái' },
+                { value: 'ACTIVE', label: 'Đang giảng dạy' },
+                { value: 'INACTIVE', label: 'Đã tạm khóa' },
               ]}
             />
           </div>
@@ -309,7 +316,6 @@ export const CenterManagerTeachersPage: React.FC = () => {
               </div>
               <Skeleton className="h-5 w-28" />
               <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-4 w-16" />
               <Skeleton className="h-6 w-20" />
             </div>
           ))}
@@ -319,7 +325,7 @@ export const CenterManagerTeachersPage: React.FC = () => {
           columns={columns}
           data={filteredTeachers}
           keyExtractor={(item) => item.id}
-          pageSize={6}
+          pageSize={8}
           emptyMessage="Không tìm thấy giảng viên nào phù hợp với bộ lọc."
         />
       )}
@@ -328,13 +334,13 @@ export const CenterManagerTeachersPage: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Thêm Giảng Viên Mới"
-        description="Đăng ký tài khoản giáo vụ, phân bổ chuyên môn và kích hoạt trợ lý AI"
+        title="Thêm Giảng Viên Mới Vào Cơ Sở"
+        description="Đăng ký tài khoản giáo vụ trực tiếp vào CSDL với mật khẩu mặc định là 030308."
         size="md"
       >
         <form onSubmit={handleAddTeacher} className="space-y-4">
           <Input
-            label="Họ và tên giáo viên"
+            label="Họ và tên giáo viên *"
             placeholder="VD: Trần Phương Linh"
             required
             value={newName}
@@ -343,7 +349,7 @@ export const CenterManagerTeachersPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label="Email"
+              label="Email công việc *"
               type="email"
               placeholder="linh.tran@englishflow.vn"
               required
@@ -351,86 +357,120 @@ export const CenterManagerTeachersPage: React.FC = () => {
               onChange={(e) => setNewEmail(e.target.value)}
             />
             <Input
-              label="Số điện thoại"
+              label="Số điện thoại / Hotline"
               placeholder="0912 345 678"
               value={newPhone}
               onChange={(e) => setNewPhone(e.target.value)}
             />
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Trình độ CEFR</label>
+              <Select
+                value={newCefrLevel}
+                onChange={(e) => setNewCefrLevel(e.target.value as any)}
+                options={[
+                  { value: 'B1', label: 'B1 - Intermediate' },
+                  { value: 'B2', label: 'B2 - Upper Intermediate' },
+                  { value: 'C1', label: 'C1 - Advanced (IELTS 7.0-8.0)' },
+                  { value: 'C2', label: 'C2 - Mastery / Native-equivalent' },
+                ]}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Phân công lớp phụ trách</label>
+              <Select
+                value={assignedClassId}
+                onChange={(e) => setAssignedClassId(e.target.value)}
+                options={[
+                  { value: '', label: 'Chưa phân công lớp' },
+                  ...classes.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+              />
+            </div>
+          </div>
+
           <Input
-            label="Chứng chỉ & Bằng cấp sư phạm"
-            placeholder="VD: IELTS 8.5 Overall, Cử nhân Sư phạm Tiếng Anh"
+            label="Bằng cấp / Chứng chỉ sư phạm"
+            placeholder="VD: IELTS 8.5 Overall, TESOL 120hrs"
             value={newQualification}
             onChange={(e) => setNewQualification(e.target.value)}
           />
 
-          <Select
-            label="Chuyên môn giảng dạy chính"
-            value={newSpecialty}
-            onChange={(e) => setNewSpecialty(e.target.value as any)}
-            options={[
-              { value: 'IELTS', label: 'Luyện thi IELTS Academic' },
-              { value: 'TOEIC', label: 'Luyện thi TOEIC 4 kỹ năng' },
-              { value: 'COMMUNICATION', label: 'Tiếng Anh giao tiếp phản xạ' },
-            ]}
-          />
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-muted-foreground">
+            Mật khẩu khởi tạo tài khoản giáo viên là: <strong className="text-primary font-mono">030308</strong>.
+          </div>
 
           <div className="pt-4 flex justify-end gap-2 border-t border-border">
-            <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsModalOpen(false)}
+              disabled={isSubmitting}
+            >
               Hủy
             </Button>
-            <Button type="submit">Xác nhận tạo hồ sơ</Button>
+            <Button type="submit" variant="primary" disabled={isSubmitting} className="gap-2">
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Đang tạo tài khoản...
+                </>
+              ) : (
+                'Tạo tài khoản giảng viên'
+              )}
+            </Button>
           </div>
         </form>
       </Modal>
 
-      {/* Modal: Teacher Profile Details */}
+      {/* Modal: View Teacher Profile */}
       {selectedTeacher && (
         <Modal
           isOpen={true}
           onClose={() => setSelectedTeacher(null)}
-          title={`Hồ sơ chi tiết: ${selectedTeacher.name}`}
-          description={`Giảng viên ${selectedTeacher.teachingSpecialty} • Gia nhập từ ${selectedTeacher.joinedDate}`}
+          title={`Hồ Sơ Giảng Viên: ${selectedTeacher.fullName}`}
+          description={`Email: ${selectedTeacher.email} • Phân quyền: GIẢNG VIÊN CHUYÊN NGỮ`}
           size="md"
         >
-          <div className="space-y-4">
-            <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/40 border border-border">
+          <div className="space-y-4 text-xs">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-border">
               <img
-                src={selectedTeacher.avatar}
-                alt={selectedTeacher.name}
-                className="w-16 h-16 rounded-full object-cover ring-2 ring-primary"
+                src={selectedTeacher.avatar || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150'}
+                alt={selectedTeacher.fullName}
+                className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/20"
               />
               <div>
-                <h3 className="font-bold text-base text-foreground">{selectedTeacher.name}</h3>
-                <p className="text-xs text-muted-foreground">{selectedTeacher.email}</p>
-                <div className="flex items-center gap-2 mt-2">
-                  <Badge variant="primary">{selectedTeacher.teachingSpecialty}</Badge>
-                  <span className="text-xs text-amber-500 font-bold flex items-center gap-1">
-                    ★ {selectedTeacher.rating.toFixed(2)} / 5.0
-                  </span>
-                </div>
+                <p className="font-bold text-foreground text-sm">{selectedTeacher.fullName}</p>
+                <p className="text-muted-foreground">{selectedTeacher.email}</p>
+                <p className="text-muted-foreground">Hotline: {selectedTeacher.phone || 'Chưa cập nhật'}</p>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Lớp học đang phụ trách:
-              </h4>
-              <div className="space-y-1.5">
-                {selectedTeacher.assignedClasses.map((cls, idx) => (
-                  <div
-                    key={idx}
-                    className="p-2.5 rounded-lg bg-background border border-border text-xs flex justify-between"
-                  >
-                    <span className="font-semibold text-foreground">{cls}</span>
-                    <span className="text-muted-foreground">Sĩ số: 20 học viên</span>
-                  </div>
-                ))}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-border text-center">
+                <span className="text-muted-foreground block text-[11px]">Trình độ chuẩn hóa</span>
+                <span className="font-bold text-primary text-sm">CEFR {selectedTeacher.cefrLevel}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-border text-center">
+                <span className="text-muted-foreground block text-[11px]">Lớp đang phụ trách</span>
+                <span className="font-bold text-foreground text-sm">{selectedTeacher.activeClassesCount} Lớp</span>
               </div>
             </div>
 
-            <div className="pt-4 flex justify-end border-t border-border">
+            <div className="pt-3 flex justify-between items-center border-t border-border">
+              <Button
+                variant={selectedTeacher.isActive ? 'outline' : 'primary'}
+                size="sm"
+                onClick={() => {
+                  void handleToggleStatus(selectedTeacher)
+                  setSelectedTeacher(null)
+                }}
+              >
+                {selectedTeacher.isActive ? 'Tạm khóa tài khoản' : 'Mở khóa tài khoản'}
+              </Button>
               <Button onClick={() => setSelectedTeacher(null)}>Đóng</Button>
             </div>
           </div>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mất kết nối — EnglishFlow LMS</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 1.25rem;
+      max-width: 480px;
+      width: 100%;
+      padding: 2.5rem 2rem;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .icon-container {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+    }
+    .icon-container svg {
+      width: 42px;
+      height: 42px;
+      stroke: #ef4444;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 0.75rem;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 1.75rem;
+    }
+    .tips {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px dashed #475569;
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin-bottom: 1.75rem;
+      text-align: left;
+    }
+    .tips-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .tips ul {
+      padding-left: 1.25rem;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      background: #4f46e5;
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.625rem;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .btn-primary:hover {
+      background: #4338ca;
+    }
+    .btn-primary:active {
+      transform: scale(0.98);
+    }
+    .badge {
+      display: inline-block;
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: #64748b;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-container">
+      <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M8.5 8.5A7.5 7.5 0 0119.5 12m-2.4 2.4A7.5 7.5 0 014.5 12m4.1-4.1a4.5 4.5 0 016.3 6.3M12 12a1.5 1.5 0 010 0" />
+      </svg>
+    </div>
+
+    <h1>Bạn đang ngoại tuyến</h1>
+    <p>Không có kết nối mạng Internet. Vui lòng kiểm tra lại đường truyền Wi-Fi hoặc dữ liệu di động của bạn.</p>
+
+    <div class="tips">
+      <div class="tips-title">💡 Gợi ý nhanh:</div>
+      <ul>
+        <li>Kiểm tra xem chế độ máy bay có đang bật không.</li>
+        <li>Tài nguyên tĩnh đã lưu đệm sẽ tự nạp lại khi có mạng.</li>
+        <li>Ứng dụng EnglishFlow PWA vẫn lưu trữ phiên làm việc của bạn.</li>
+      </ul>
+    </div>
+
+    <div class="actions">
+      <button class="btn-primary" onclick="window.location.reload()">
+        Thử tải lại trang
+      </button>
+    </div>
+
+    <div class="badge">EnglishFlow LMS • Progressive Web App</div>
+  </div>
+
+  <script>
+    window.addEventListener('online', () => {
+      window.location.reload();
+    });
+  </script>
+</body>
+</html>
+

@@ -462,7 +462,7 @@ export const StudentPracticeLabPage: React.FC = () => {
                 <div className="space-y-2">
                   <span className="text-xs font-bold text-foreground block">Lỗi phát âm cần lưu ý:</span>
                   {speakingResult.detectedErrors.map((err: any, idx: number) => (
-                    <div key={idx} className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs">
+                    <div key={err.word ? `err-${err.word}-${idx}` : `err-${idx}`} className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-foreground">{err.word}</span>
                         <div className="flex gap-2 font-mono text-[11px]">
@@ -598,7 +598,7 @@ export const StudentPracticeLabPage: React.FC = () => {
                 <div className="space-y-2">
                   <span className="text-xs font-bold text-foreground block">Điểm sáng & góp ý từ vựng:</span>
                   {writingResult.corrections.map((item: any, idx: number) => (
-                    <div key={idx} className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs">
+                    <div key={item.original ? `corr-${item.original}-${idx}` : `corr-${idx}`} className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs">
                       <span className="font-bold text-emerald-600 block">"{item.original}"</span>
                       <p className="text-[11px] text-muted-foreground mt-0.5">{item.note}</p>
                     </div>
